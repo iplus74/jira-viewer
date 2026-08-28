@@ -1,0 +1,63 @@
+jira 이슈 목록과 내용을 열람하고 상태업데이트 등을 처리하는 앱을 개발합니다.
+
+1. 구현 방식
+- 런타임
+Node.js (Electron 내장)
+- 프레임워크
+Electron
+- AI 기능
+@github/copilot-sdk
+- UI
+Vanilla HTML + CSS + JavaScript
+- 빌드 도구
+electron-builder
+- 설정 저장
+브라우저 `localStorage`
+- 패키징 형식
+macOS `.dmg`, Windows `.exe` (NSIS), Linux `.AppImage` 
+
+2. jira 이슈 목록
+2.1 검색 항목
+2.1.1 종류 (type, select field)
+- 이슈
+- 맨션된 이슈
+2.1.2 상태 (status, select field)
+- '백로그' , '진행 중'인 상태
+- '테스트 요청'
+- '완료'
+- '전체'
+2.1.3 이메일 (email, text field)
+2.1.4 최대 개수 (max_num, number field)
+
+2.2 검색 로직
+2.2.1 '종류'가 '이슈'일 때
+이슈 상태 == {status} && 담당자 == {email} 조건을 만족하는 
+최근 이슈 최대 {max_num} 개를 가져옵니다.
+
+2.2.2 '종류'가 '맨션된 이슈'일 때
+이슈 상태 == {status} && 담당자 != {email} 
+&& 댓글에서 {email} 사용자가 맨션되었지만 해당 댓글의 대댓글이 없거나 대댓글 작성자가 {email}이 아닌 상태 조건을 만족하는
+최근 이슈 최대 {max_num} 개를 가져옵니다.
+
+2.3 목록 항목
+2.3.1 이슈 제목
+클릭하면 Jira 이슈 보기로 이동합니다.
+2.3.2 이슈 담당자
+2.3.3 이슈 상태
+
+2.4 참고 
+- /Users/yangsukim/data/work/house_sara/jira-finder/index.js > downloadIssues() 참고
+- /Users/yangsukim/data/work/house_sara/jira-finder/index.js > downloadMentionList() 참고
+
+3. Jira 이슈 보기
+Jira 이슈 내용을 보여주고 상태변경 및 AI 내용요약 기능을 추가합니다.
+3.1 내용 포맷
+/Users/yangsukim/data/work/house_sara/jira-finder/index.js > downloadIssue() 참고
+
+3.2 상단에 이슈 상태 변경 기능
+3.3 AI 내용 요약 기능
+Jira 이슈 내용과 댓글 정보를 조회하여 작업자가 해야할 업무 내용을 정리하여 파일로 저장하고 팝업 창으로 보여줍니다.
+이미 요약된 내용이 존재하면 해당 내용을 팝업 창으로 바로 보여주고
+새로운 요약이 필요한 경우에는 Jira 이슈 내용을 기반으로 AI가 요약한 내용을 파일로 저장하고 팝업 창으로 보여줍니다.
+3.4 이전 버튼
+이전 화면으로 돌아가는 기능을 제공합니다.
