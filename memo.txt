@@ -22,7 +22,7 @@ macOS `.dmg`, Windows `.exe` (NSIS), Linux `.AppImage`
 - 이슈
 - 맨션된 이슈
 2.1.2 상태 (status, select field)
-- '백로그' , '진행 중'인 상태
+- '백로그' , '진행 중', '검토 중' 인 상태
 - '테스트 요청'
 - '완료'
 - '전체'

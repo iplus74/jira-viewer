@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8" />
+<title>Jira Viewer</title>
+<link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div id="app">
+    <header id="app-header">
+      <h1>Jira Viewer</h1>
+      <button id="settings-toggle" class="btn-secondary">설정</button>
+    </header>
+
+    <section id="settings-panel" class="panel hidden">
+      <h2>Jira 연결 설정</h2>
+      <div class="form-row">
+        <label>Jira 도메인 URL</label>
+        <input type="text" id="cfg-jiraUrl" placeholder="https://your-domain.atlassian.net" />
+      </div>
+      <div class="form-row">
+        <label>계정 이메일</label>
+        <input type="text" id="cfg-email" placeholder="you@example.com" />
+      </div>
+      <div class="form-row">
+        <label>API 토큰</label>
+        <input type="password" id="cfg-token" placeholder="Jira API Token" />
+      </div>
+      <div class="form-row">
+        <small>토큰은 브라우저 localStorage에 저장됩니다. 공용 PC에서는 사용 후 삭제를 권장합니다.</small>
+      </div>
+      <div class="form-actions">
+        <button id="cfg-save" class="btn-primary">저장</button>
+        <button id="cfg-cancel" class="btn-secondary">취소</button>
+      </div>
+    </section>
+
+    <section id="search-screen" class="screen">
+      <h2>이슈 검색</h2>
+      <div class="search-form">
+        <div class="form-row">
+          <label>종류</label>
+          <select id="search-type">
+            <option value="assigned">이슈</option>
+            <option value="mention">맨션된 이슈</option>
+          </select>
+        </div>
+        <div class="form-row">
+          <label>상태</label>
+          <select id="search-status">
+            <option value="default">백로그·진행 중·검토 중</option>
+            <option value="test">테스트 요청</option>
+            <option value="done">완료</option>
+            <option value="all">전체</option>
+          </select>
+        </div>
+        <div class="form-row">
+          <label>이메일</label>
+          <input type="text" id="search-email" placeholder="you@example.com" />
+        </div>
+        <div class="form-row">
+          <label>최대 개수</label>
+          <input type="number" id="search-maxnum" value="20" min="1" max="200" />
+        </div>
+        <div class="form-actions">
+          <button id="search-btn" class="btn-primary">검색</button>
+        </div>
+      </div>
+      <div id="search-status-msg" class="status-msg"></div>
+      <div id="issue-list" class="issue-list"></div>
+    </section>
+
+    <section id="detail-screen" class="screen hidden">
+      <div class="detail-toolbar">
+        <button id="back-btn" class="btn-secondary">← 이전</button>
+        <div class="detail-status-control">
+          <label>상태 변경:</label>
+          <select id="status-select"></select>
+          <button id="status-apply-btn" class="btn-primary">적용</button>
+        </div>
+        <button id="ai-summary-btn" class="btn-accent">AI 요약</button>
+        <button id="open-browser-btn" class="btn-secondary">브라우저로 열기</button>
+      </div>
+      <div id="issue-detail"></div>
+    </section>
+  </div>
+
+  <div id="ai-summary-modal" class="modal hidden">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3>AI 업무 요약</h3>
+        <button id="ai-modal-close" class="btn-secondary">닫기</button>
+      </div>
+      <div class="modal-body">
+        <div id="ai-summary-meta" class="status-msg"></div>
+        <pre id="ai-summary-text"></pre>
+      </div>
+      <div class="modal-actions">
+        <button id="ai-refresh-btn" class="btn-secondary">다시 생성</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="renderer.js"></script>
+</body>
+</html>
