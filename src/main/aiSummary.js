@@ -11,18 +11,30 @@ const fs = require('fs/promises');
 const path = require('path');
 const { app } = require('electron');
 
-let CopilotClientCtor = null;
-function loadCopilotClient() {
-  if (CopilotClientCtor === null) {
+let CopilotSdkModule = null;
+function loadCopilotSdk() {
+  if (CopilotSdkModule === null) {
     try {
       // eslint-disable-next-line global-require
-      CopilotClientCtor = require('@github/copilot-sdk').CopilotClient;
+      CopilotSdkModule = require('@github/copilot-sdk');
     } catch (err) {
-      CopilotClientCtor = false;
+      CopilotSdkModule = false;
       console.error('@github/copilot-sdk 로드 실패:', err.message);
     }
   }
-  return CopilotClientCtor || null;
+  return CopilotSdkModule || null;
+}
+
+// Electron의 process.execPath(Electron 바이너리)로 번들 CLI(index.js)를 실행하면
+// 인자 파싱이 깨지므로, 플랫폼별 네이티브 copilot 실행 파일을 직접 사용한다.
+function resolveNativeCliPath() {
+  try {
+    const packageName = `@github/copilot-${process.platform}-${process.arch}`;
+    return require.resolve(packageName);
+  } catch (err) {
+    console.error('Copilot CLI 네이티브 바이너리를 찾지 못했습니다:', err.message);
+    return null;
+  }
 }
 
 function getSummaryDir() {
@@ -82,13 +94,26 @@ ${commentsText || '등록된 댓글이 없습니다.'}
 /**
  * copilot-sdk 를 사용해 요약 텍스트 생성
  */
-async function generateSummaryText(issueDetail) {
-  const CopilotClient = loadCopilotClient();
-  if (!CopilotClient) {
+async function generateSummaryText(issueDetail, githubToken) {
+  const sdk = loadCopilotSdk();
+  if (!sdk) {
     throw new Error('@github/copilot-sdk 를 사용할 수 없습니다. 패키지가 설치되어 있는지 확인해 주세요.');
   }
+  const { CopilotClient, RuntimeConnection } = sdk;
 
-  const client = new CopilotClient();
+  const token = sanitizeGithubToken(githubToken || process.env.GITHUB_TOKEN || process.env.GH_TOKEN);
+  const clientOptions = {};
+  if (token) {
+    // 토큰을 명시적으로 전달해 macOS 키체인 기반 로그인 사용자 인증(비밀번호 반복 요청)을 건너뜁니다.
+    clientOptions.gitHubToken = token;
+    clientOptions.useLoggedInUser = false;
+  }
+  const nativeCliPath = resolveNativeCliPath();
+  if (nativeCliPath) {
+    clientOptions.connection = RuntimeConnection.forStdio({ path: nativeCliPath });
+  }
+
+  const client = new CopilotClient(clientOptions);
   try {
     await client.start();
     const session = await client.createSession({});
@@ -97,6 +122,15 @@ async function generateSummaryText(issueDetail) {
     const content = result?.data?.content || '요약을 생성하지 못했습니다.';
     await session.disconnect();
     return content;
+  } catch (err) {
+    if (token && /Bad credentials|401/i.test(err.message || '')) {
+      throw new Error(
+        '설정된 GitHub 토큰이 GitHub에서 거부되었습니다(Bad credentials). 토큰이 만료/취소되지 않았는지, ' +
+          '복사 시 공백이나 따옴표가 포함되지 않았는지 확인하거나, 설정에서 토큰을 비워 두어 로컬에 로그인된 ' +
+          'Copilot CLI 인증을 사용해 보세요.'
+      );
+    }
+    throw err;
   } finally {
     try {
       await client.stop();
@@ -106,12 +140,23 @@ async function generateSummaryText(issueDetail) {
   }
 }
 
+// 붙여넣기 과정에서 흔히 섞여 들어가는 'Bearer ' 접두어, 따옴표, 공백 제거
+function sanitizeGithubToken(rawToken) {
+  if (!rawToken) return '';
+  return String(rawToken)
+    .trim()
+    .replace(/^Bearer\s+/i, '')
+    .replace(/^['"]|['"]$/g, '')
+    .trim();
+}
+
 /**
  * 이슈 요약을 조회하거나 새로 생성합니다.
  * @param {object} issueDetail - jiraClient.getIssueDetail() 결과
  * @param {boolean} forceRefresh - 강제로 재생성할지 여부
+ * @param {string} [githubToken] - Copilot 인증에 사용할 GitHub 토큰
  */
-async function getOrCreateSummary(issueDetail, forceRefresh = false) {
+async function getOrCreateSummary(issueDetail, forceRefresh = false, githubToken) {
   const issueKey = issueDetail.key;
   const existing = await readExistingSummary(issueKey);
 
@@ -125,7 +170,7 @@ async function getOrCreateSummary(issueDetail, forceRefresh = false) {
     }
   }
 
-  const summaryText = await generateSummaryText(issueDetail);
+  const summaryText = await generateSummaryText(issueDetail, githubToken);
   const record = {
     issueKey,
     summary: summaryText,

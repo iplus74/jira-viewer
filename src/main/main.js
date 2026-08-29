@@ -1,6 +1,6 @@
 'use strict';
 
-const { app, BrowserWindow, ipcMain, shell } = require('electron');
+const { app, BrowserWindow, ipcMain, shell, dialog } = require('electron');
 const path = require('path');
 
 const jiraClient = require('./jiraClient');
@@ -15,7 +15,8 @@ function createWindow() {
     webPreferences: {
       preload: path.join(__dirname, '..', 'preload', 'preload.js'),
       contextIsolation: true,
-      nodeIntegration: false
+      nodeIntegration: false,
+      sandbox: false
     }
   });
 
@@ -68,7 +69,7 @@ ipcMain.handle('jira:search', async (_event, payload) => {
 // 이슈 상세 조회
 ipcMain.handle('jira:getIssue', async (_event, payload) => {
   const config = buildJiraConfig(payload);
-  return jiraClient.getIssueDetail(payload.issueKey, config);
+  return jiraClient.getIssueDetail(payload.issueKey, config, payload.downloadDir);
 });
 
 // 이슈 상태 변경 가능한 트랜지션 목록 조회
@@ -81,7 +82,7 @@ ipcMain.handle('jira:getTransitions', async (_event, payload) => {
 ipcMain.handle('jira:transitionIssue', async (_event, payload) => {
   const config = buildJiraConfig(payload);
   await jiraClient.transitionIssueStatus(payload.issueKey, payload.targetStatusName, config);
-  return jiraClient.getIssueDetail(payload.issueKey, config);
+  return jiraClient.getIssueDetail(payload.issueKey, config, payload.downloadDir);
 });
 
 // 웹 브라우저로 이슈 열기
@@ -90,10 +91,27 @@ ipcMain.handle('jira:openInBrowser', async (_event, webUrl) => {
   return true;
 });
 
+// 첨부파일 다운로드 폴더 선택 다이얼로그
+ipcMain.handle('settings:chooseDownloadFolder', async () => {
+  const result = await dialog.showOpenDialog(mainWindow, {
+    properties: ['openDirectory', 'createDirectory']
+  });
+  if (result.canceled || !result.filePaths.length) {
+    return null;
+  }
+  return result.filePaths[0];
+});
+
+// 다운로드된 첨부파일을 기본 프로그램으로 열기
+ipcMain.handle('shell:openPath', async (_event, filePath) => {
+  if (!filePath) return '';
+  return shell.openPath(filePath);
+});
+
 // AI 요약 조회/생성
 ipcMain.handle('ai:getSummary', async (_event, payload) => {
   const config = buildJiraConfig(payload);
   const forceRefresh = Boolean(payload.forceRefresh);
   const issueDetail = await jiraClient.getIssueDetail(payload.issueKey, config);
-  return aiSummary.getOrCreateSummary(issueDetail, forceRefresh);
+  return aiSummary.getOrCreateSummary(issueDetail, forceRefresh, payload.githubToken);
 });

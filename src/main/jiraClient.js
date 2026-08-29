@@ -6,10 +6,52 @@
  * 동일한 JQL/필터 규칙으로 재구현한 모듈입니다.
  */
 
+const fs = require('fs');
 const path = require('path');
+const { buildAttachmentMarker } = require('../shared/attachmentMarker');
 
 // URL 메타데이터(타이틀) 캐시
 const urlTitleCache = new Map();
+// 첨부파일 다운로드 캐시 (다운로드 폴더 + 첨부파일 ID 기준)
+const attachmentDownloadCache = new Map();
+
+function sanitizeFilename(name) {
+  return String(name || 'file').replace(/[\\/:*?"<>|]/g, '_').trim() || 'file';
+}
+
+/**
+ * 첨부파일을 지정된 폴더로 다운로드하고 로컬 절대 경로를 반환. 이미 받은 파일은 재사용.
+ */
+async function downloadAttachmentToFolder(attachment, downloadDir, config) {
+  if (!downloadDir || !attachment || !attachment.content) return null;
+  const cacheKey = `${downloadDir}::${attachment.id}`;
+  if (attachmentDownloadCache.has(cacheKey)) {
+    return attachmentDownloadCache.get(cacheKey);
+  }
+
+  try {
+    fs.mkdirSync(downloadDir, { recursive: true });
+    const safeName = `${attachment.id}_${sanitizeFilename(attachment.filename)}`;
+    const destPath = path.join(downloadDir, safeName);
+
+    if (!fs.existsSync(destPath)) {
+      const headers = buildAuthHeaders(config);
+      headers.Accept = '*/*';
+      const response = await fetch(attachment.content, { method: 'GET', headers });
+      if (!response.ok) {
+        throw new Error(`${response.status}`);
+      }
+      const buffer = Buffer.from(await response.arrayBuffer());
+      fs.writeFileSync(destPath, buffer);
+    }
+
+    attachmentDownloadCache.set(cacheKey, destPath);
+    return destPath;
+  } catch (err) {
+    console.error(`첨부파일(${attachment.filename}) 다운로드 실패:`, err.message);
+    return null;
+  }
+}
 
 function buildAuthHeaders(config) {
   const { email, token } = config;
@@ -133,7 +175,14 @@ async function fetchUrlTitle(url, config) {
 /**
  * ADF(Atlassian Document Format)를 마크다운 텍스트로 변환
  */
-async function adfToText(adf, attachments = [], isLocal = false, config, context = { depth: 0, listType: null, itemIndex: 1 }) {
+async function adfToText(
+  adf,
+  attachments = [],
+  isLocal = false,
+  config,
+  context = { depth: 0, listType: null, itemIndex: 1 },
+  downloadDir = null
+) {
   if (!adf) return '';
   if (typeof adf === 'string') return adf;
 
@@ -202,7 +251,15 @@ async function adfToText(adf, attachments = [], isLocal = false, config, context
       }
 
       if (matched) {
-        if (isLocal) {
+        if (downloadDir) {
+          const localPath = await downloadAttachmentToFolder(matched, downloadDir, config);
+          if (localPath) {
+            const kind = (matched.mimeType || '').startsWith('image/') ? 'image' : 'file';
+            text += `\n${buildAttachmentMarker(kind, localPath, matched.filename)}\n`;
+          } else {
+            text += `\n[첨부 이미지: ${matched.filename} (${matched.content})]\n`;
+          }
+        } else if (isLocal) {
           const localName = matched.localFilename || matched.filename;
           text += `\n![첨부 파일](./images/${localName})\n`;
         } else {
@@ -233,7 +290,7 @@ async function adfToText(adf, attachments = [], isLocal = false, config, context
   if (adf.text) {
     let nodeText = adf.text;
     if (adf.marks && Array.isArray(adf.marks)) {
-      adf.marks.forEach((mark) => {
+      for (const mark of adf.marks) {
         if (mark.type === 'strong') {
           nodeText = `**${nodeText}**`;
         } else if (mark.type === 'em') {
@@ -245,18 +302,26 @@ async function adfToText(adf, attachments = [], isLocal = false, config, context
         } else if (mark.type === 'link') {
           const href = mark.attrs?.href || '';
           let matchedAtt = null;
-          if (isLocal && attachments && attachments.length > 0) {
+          if (attachments && attachments.length > 0) {
             matchedAtt = attachments.find(
               (att) => att.content === href || (att.id && href.includes(`/attachment/content/${att.id}`))
             );
           }
-          if (matchedAtt && matchedAtt.localFilename) {
+          if (matchedAtt && downloadDir) {
+            const localPath = await downloadAttachmentToFolder(matchedAtt, downloadDir, config);
+            if (localPath) {
+              const kind = (matchedAtt.mimeType || '').startsWith('image/') ? 'image' : 'file';
+              nodeText = buildAttachmentMarker(kind, localPath, matchedAtt.filename);
+            } else {
+              nodeText = `[${nodeText}](${href})`;
+            }
+          } else if (matchedAtt && isLocal && matchedAtt.localFilename) {
             nodeText = `![${nodeText}](./images/${matchedAtt.localFilename})`;
           } else {
             nodeText = `[${nodeText}](${href})`;
           }
         }
-      });
+      }
     }
     text += nodeText;
   }
@@ -266,7 +331,7 @@ async function adfToText(adf, attachments = [], isLocal = false, config, context
     for (let index = 0; index < adf.content.length; index++) {
       const child = adf.content[index];
       const childContext = isList ? { ...context, itemIndex: index + 1 } : context;
-      text += await adfToText(child, attachments, isLocal, config, childContext);
+      text += await adfToText(child, attachments, isLocal, config, childContext, downloadDir);
     }
   }
 
@@ -509,7 +574,7 @@ async function resolveAccountId(emailOrAccountId, config) {
 /**
  * 이슈 상세 조회. downloadIssue()/getIssueDetails() 포맷 참고.
  */
-async function getIssueDetail(issueKey, config) {
+async function getIssueDetail(issueKey, config, downloadDir = null) {
   const headers = buildAuthHeaders(config);
   const issueUrl = new URL(`${config.jiraUrl}/rest/api/3/issue/${issueKey}`);
   issueUrl.searchParams.append('fields', 'summary,description,comment,attachment,status,assignee');
@@ -527,7 +592,8 @@ async function getIssueDetail(issueKey, config) {
   const attachments = fields.attachment || [];
   const status = fields.status?.name || '알 수 없음';
   const assignee = fields.assignee?.displayName || '미배정';
-  const descriptionText = (await adfToText(rawDescription, attachments, false, config)).trim() || '설명 없음';
+  const descriptionText =
+    (await adfToText(rawDescription, attachments, false, config, undefined, downloadDir)).trim() || '설명 없음';
 
   const comments = await getIssueComments(issueKey, config);
   const webUrl = `${config.jiraUrl}/browse/${issueKey}`;
@@ -535,14 +601,14 @@ async function getIssueDetail(issueKey, config) {
   const threaded = threadComments(comments);
   const commentList = [];
   for (const parent of threaded) {
-    const parentText = (await adfToText(parent.body, attachments, false, config)).trim();
+    const parentText = (await adfToText(parent.body, attachments, false, config, undefined, downloadDir)).trim();
     const replies = [];
     for (const child of parent.replies) {
       replies.push({
         author: child.author?.displayName || '알 수 없음',
         accountId: child.author?.accountId || '',
         created: child.created,
-        text: (await adfToText(child.body, attachments, false, config)).trim(),
+        text: (await adfToText(child.body, attachments, false, config, undefined, downloadDir)).trim(),
         index: child.originalIndex
       });
     }

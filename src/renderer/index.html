@@ -27,6 +27,20 @@
         <input type="password" id="cfg-token" placeholder="Jira API Token" />
       </div>
       <div class="form-row">
+        <label>첨부파일 다운로드 폴더</label>
+        <div class="form-inline">
+          <input type="text" id="cfg-downloadDir" placeholder="다운로드 폴더를 선택하세요" readonly />
+          <button id="cfg-choose-folder" class="btn-secondary">폴더 선택</button>
+        </div>
+      </div>
+      <div class="form-row">
+        <label>GitHub 토큰 (AI 요약용)</label>
+        <input type="password" id="cfg-githubToken" placeholder="Copilot 사용 가능한 GitHub 토큰 (선택)" />
+      </div>
+      <div class="form-row">
+        <small>토큰을 비워두면 로컬에 로그인된 Copilot CLI(`copilot login`) 인증을 사용합니다. 입력 시 반드시 유효한 토큰이어야 합니다(Bad credentials 오류 시 토큰 값을 확인하거나 비워 두세요).</small>
+      </div>
+      <div class="form-row">
         <small>토큰은 브라우저 localStorage에 저장됩니다. 공용 PC에서는 사용 후 삭제를 권장합니다.</small>
       </div>
       <div class="form-actions">

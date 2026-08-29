@@ -55,6 +55,20 @@ body {
   font-size: 14px;
 }
 
+.form-inline {
+  display: flex;
+  gap: 8px;
+}
+
+.form-inline input {
+  flex: 1;
+  padding: 8px 10px;
+  border: 1px solid #dfe1e6;
+  border-radius: 4px;
+  font-size: 14px;
+  background: #fafbfc;
+}
+
 .form-actions {
   display: flex;
   gap: 8px;
@@ -195,6 +209,40 @@ button {
 .comment-text {
   white-space: pre-wrap;
   line-height: 1.5;
+}
+
+.attachment-block {
+  margin: 10px 0;
+}
+
+.attachment-img {
+  max-width: 100%;
+  border: 1px solid #dfe1e6;
+  border-radius: 4px;
+  display: block;
+}
+
+.attachment-caption {
+  font-size: 12px;
+  color: #6b778c;
+  margin-top: 4px;
+}
+
+.attachment-file-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: 6px 0;
+  padding: 6px 10px;
+  background: #f4f5f7;
+  border: 1px solid #dfe1e6;
+  border-radius: 4px;
+  font-size: 13px;
+  color: #0052cc;
+}
+
+.attachment-file-link:hover {
+  background: #ebecf0;
 }
 
 .modal {
