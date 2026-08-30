@@ -2,16 +2,25 @@
 
 const { app, BrowserWindow, ipcMain, shell, dialog } = require('electron');
 const path = require('path');
+const { execFile } = require('child_process');
 
 const jiraClient = require('./jiraClient');
 const aiSummary = require('./aiSummary');
 
 let mainWindow = null;
+const appIconPath = path.join(__dirname, '..', '..', 'build', 'icon.png');
+
+// 처리되지 않은 Promise 거부로 앱 전체가 죽지 않도록 보호 (예: 아이콘 로딩 실패 등)
+process.on('unhandledRejection', (err) => {
+  console.error('처리되지 않은 Promise 오류:', err);
+});
+
 
 function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1200,
     height: 800,
+    icon: appIconPath,
     webPreferences: {
       preload: path.join(__dirname, '..', 'preload', 'preload.js'),
       contextIsolation: true,
@@ -24,6 +33,14 @@ function createWindow() {
 }
 
 app.whenReady().then(() => {
+  if (process.platform === 'darwin' && app.dock) {
+    // 아이콘 로딩 실패(패키징 누락 등)가 앱 실행 자체를 막지 않도록 방어
+    try {
+      app.dock.setIcon(appIconPath);
+    } catch (err) {
+      console.error('Dock 아이콘 설정 실패:', err);
+    }
+  }
   createWindow();
 
   app.on('activate', () => {
@@ -45,6 +62,49 @@ function buildJiraConfig(payload) {
     throw new Error('Jira 도메인, 이메일, API 토큰이 모두 필요합니다.');
   }
   return { jiraUrl: jiraUrl.replace(/\/$/, ''), email, token };
+}
+
+function isSafeHttpUrl(value) {
+  try {
+    const parsed = new URL(String(value));
+    return parsed.protocol === 'http:' || parsed.protocol === 'https:';
+  } catch {
+    return false;
+  }
+}
+
+function isSafeMailtoUrl(value) {
+  try {
+    const parsed = new URL(String(value));
+    return parsed.protocol === 'mailto:' && parsed.pathname.length > 0;
+  } catch {
+    return false;
+  }
+}
+
+// Chrome으로 강제 실행, 실패 시(미설치 등) 기본 브라우저로 대체
+function openInChrome(url) {
+  return new Promise((resolve) => {
+    let command;
+    let args;
+    if (process.platform === 'darwin') {
+      command = 'open';
+      args = ['-a', 'Google Chrome', url];
+    } else if (process.platform === 'win32') {
+      command = 'cmd';
+      args = ['/c', 'start', '', 'chrome', url];
+    } else {
+      command = 'google-chrome';
+      args = [url];
+    }
+    execFile(command, args, (error) => {
+      if (error) {
+        shell.openExternal(url).finally(resolve);
+      } else {
+        resolve();
+      }
+    });
+  });
 }
 
 // 이슈 검색: 종류에 따라 담당자 검색 또는 맨션 검색 수행
@@ -85,9 +145,16 @@ ipcMain.handle('jira:transitionIssue', async (_event, payload) => {
   return jiraClient.getIssueDetail(payload.issueKey, config, payload.downloadDir);
 });
 
-// 웹 브라우저로 이슈 열기
+// 웹 브라우저로 이슈 열기 (Chrome 우선 실행, mailto는 기본 메일 앱으로 실행)
 ipcMain.handle('jira:openInBrowser', async (_event, webUrl) => {
-  await shell.openExternal(webUrl);
+  if (isSafeMailtoUrl(webUrl)) {
+    await shell.openExternal(webUrl);
+    return true;
+  }
+  if (!isSafeHttpUrl(webUrl)) {
+    throw new Error('유효하지 않은 URL입니다.');
+  }
+  await openInChrome(webUrl);
   return true;
 });
 
@@ -113,5 +180,5 @@ ipcMain.handle('ai:getSummary', async (_event, payload) => {
   const config = buildJiraConfig(payload);
   const forceRefresh = Boolean(payload.forceRefresh);
   const issueDetail = await jiraClient.getIssueDetail(payload.issueKey, config);
-  return aiSummary.getOrCreateSummary(issueDetail, forceRefresh, payload.githubToken);
+  return aiSummary.getOrCreateSummary(issueDetail, forceRefresh, payload.githubToken, payload.aiModels);
 });

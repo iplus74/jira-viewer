@@ -8,6 +8,7 @@
  */
 
 const fs = require('fs/promises');
+const fsSync = require('fs');
 const path = require('path');
 const { app } = require('electron');
 
@@ -27,14 +28,64 @@ function loadCopilotSdk() {
 
 // Electron의 process.execPath(Electron 바이너리)로 번들 CLI(index.js)를 실행하면
 // 인자 파싱이 깨지므로, 플랫폼별 네이티브 copilot 실행 파일을 직접 사용한다.
+// 패키징된 앱에서는 app.asar 내부에서 직접 실행 시 spawn ENOTDIR 가 발생하므로
+// app.asar.unpacked 경로로 치환하고 실제 파일 존재 여부 및 권한을 확인한다.
 function resolveNativeCliPath() {
+  const binaryName = process.platform === 'win32' ? 'copilot.exe' : 'copilot';
+  const packageName = `@github/copilot-${process.platform}-${process.arch}`;
+  const candidates = [];
+
   try {
-    const packageName = `@github/copilot-${process.platform}-${process.arch}`;
-    return require.resolve(packageName);
-  } catch (err) {
-    console.error('Copilot CLI 네이티브 바이너리를 찾지 못했습니다:', err.message);
-    return null;
+    const copilotEntryPath = require.resolve('@github/copilot/package.json');
+    const resolved = require.resolve(packageName, { paths: [path.dirname(copilotEntryPath)] });
+    if (resolved) {
+      if (resolved.includes('app.asar')) {
+        candidates.push(resolved.replace('app.asar', 'app.asar.unpacked'));
+      }
+      candidates.push(resolved);
+    }
+  } catch {
+    // ignore
   }
+
+  if (process.resourcesPath) {
+    candidates.push(
+      path.join(process.resourcesPath, 'app.asar.unpacked', 'node_modules', '@github', `copilot-${process.platform}-${process.arch}`, binaryName),
+      path.join(process.resourcesPath, 'app.asar.unpacked', 'node_modules', '@github', 'copilot', 'node_modules', `@github/copilot-${process.platform}-${process.arch}`, binaryName)
+    );
+  }
+
+  if (typeof app?.getAppPath === 'function') {
+    const appPath = app.getAppPath();
+    const unpackedBase = appPath.replace('app.asar', 'app.asar.unpacked');
+    candidates.push(
+      path.join(unpackedBase, 'node_modules', '@github', `copilot-${process.platform}-${process.arch}`, binaryName),
+      path.join(unpackedBase, 'node_modules', '@github', 'copilot', 'node_modules', `@github/copilot-${process.platform}-${process.arch}`, binaryName)
+    );
+  }
+
+  for (const candidate of candidates) {
+    try {
+      if (fsSync.existsSync(candidate)) {
+        const stat = fsSync.statSync(candidate);
+        if (stat.isFile()) {
+          if (process.platform !== 'win32') {
+            try {
+              fsSync.chmodSync(candidate, 0o755);
+            } catch {
+              // ignore chmod failure
+            }
+          }
+          return candidate;
+        }
+      }
+    } catch {
+      // ignore
+    }
+  }
+
+  console.error('Copilot CLI 네이티브 바이너리를 찾지 못했습니다.');
+  return null;
 }
 
 function getSummaryDir() {
@@ -93,16 +144,28 @@ ${commentsText || '등록된 댓글이 없습니다.'}
 
 /**
  * copilot-sdk 를 사용해 요약 텍스트 생성
+ * @param {object} issueDetail - jiraClient.getIssueDetail() 결과
+ * @param {string} [githubToken] - Copilot 인증에 사용할 GitHub 토큰
+ * @param {string[]} [models] - 시도할 모델 이름 목록(순서대로 시도, 실패 시 다음 모델로 대체)
  */
-async function generateSummaryText(issueDetail, githubToken) {
+async function generateSummaryText(issueDetail, githubToken, models) {
   const sdk = loadCopilotSdk();
   if (!sdk) {
     throw new Error('@github/copilot-sdk 를 사용할 수 없습니다. 패키지가 설치되어 있는지 확인해 주세요.');
   }
   const { CopilotClient, RuntimeConnection } = sdk;
 
+  const summaryDir = getSummaryDir();
+  try {
+    await fs.mkdir(summaryDir, { recursive: true });
+  } catch {
+    // ignore
+  }
+
   const token = sanitizeGithubToken(githubToken || process.env.GITHUB_TOKEN || process.env.GH_TOKEN);
-  const clientOptions = {};
+  const clientOptions = {
+    workingDirectory: summaryDir
+  };
   if (token) {
     // 토큰을 명시적으로 전달해 macOS 키체인 기반 로그인 사용자 인증(비밀번호 반복 요청)을 건너뜁니다.
     clientOptions.gitHubToken = token;
@@ -113,15 +176,35 @@ async function generateSummaryText(issueDetail, githubToken) {
     clientOptions.connection = RuntimeConnection.forStdio({ path: nativeCliPath });
   }
 
+  // 모델 목록이 비어 있으면 undefined 하나로 시도해 CLI의 기본 모델을 사용한다.
+  const modelList = Array.isArray(models) && models.length ? models : [undefined];
+  const prompt = buildSummaryPrompt(issueDetail);
+
   const client = new CopilotClient(clientOptions);
   try {
     await client.start();
-    const session = await client.createSession({});
-    const prompt = buildSummaryPrompt(issueDetail);
-    const result = await session.sendAndWait(prompt, 120000);
-    const content = result?.data?.content || '요약을 생성하지 못했습니다.';
-    await session.disconnect();
-    return content;
+    let lastError = null;
+    for (const model of modelList) {
+      let session;
+      try {
+        session = await client.createSession(model ? { model } : {});
+        const result = await session.sendAndWait(prompt, 120000);
+        const content = result?.data?.content || '요약을 생성하지 못했습니다.';
+        await session.disconnect();
+        return content;
+      } catch (err) {
+        lastError = err;
+        console.error(`모델 "${model || '기본값'}"로 요약 생성 실패:`, err.message);
+        if (session) {
+          try {
+            await session.disconnect();
+          } catch {
+            // ignore disconnect errors
+          }
+        }
+      }
+    }
+    throw lastError || new Error('요약을 생성하지 못했습니다.');
   } catch (err) {
     if (token && /Bad credentials|401/i.test(err.message || '')) {
       throw new Error(
@@ -155,8 +238,9 @@ function sanitizeGithubToken(rawToken) {
  * @param {object} issueDetail - jiraClient.getIssueDetail() 결과
  * @param {boolean} forceRefresh - 강제로 재생성할지 여부
  * @param {string} [githubToken] - Copilot 인증에 사용할 GitHub 토큰
+ * @param {string[]} [models] - 시도할 모델 이름 목록(순서대로 시도, 실패 시 다음 모델로 대체)
  */
-async function getOrCreateSummary(issueDetail, forceRefresh = false, githubToken) {
+async function getOrCreateSummary(issueDetail, forceRefresh = false, githubToken, models) {
   const issueKey = issueDetail.key;
   const existing = await readExistingSummary(issueKey);
 
@@ -170,7 +254,7 @@ async function getOrCreateSummary(issueDetail, forceRefresh = false, githubToken
     }
   }
 
-  const summaryText = await generateSummaryText(issueDetail, githubToken);
+  const summaryText = await generateSummaryText(issueDetail, githubToken, models);
   const record = {
     issueKey,
     summary: summaryText,

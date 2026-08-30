@@ -8,6 +8,8 @@
   "private": true,
   "scripts": {
     "start": "electron .",
+    "build:css": "tailwindcss -i ./src/renderer/tailwind.css -o ./src/renderer/styles.css --minify",
+    "watch:css": "tailwindcss -i ./src/renderer/tailwind.css -o ./src/renderer/styles.css --watch",
     "dist": "electron-builder",
     "dist:mac": "electron-builder --mac",
     "dist:win": "electron-builder --win",
@@ -17,33 +19,56 @@
     "@github/copilot-sdk": "^1.0.11"
   },
   "devDependencies": {
+    "@tailwindcss/cli": "^4.3.3",
     "electron": "^32.0.0",
-    "electron-builder": "^25.0.0"
+    "electron-builder": "^25.0.0",
+    "tailwindcss": "^4.3.3"
   },
   "build": {
     "appId": "com.wecostay.jiraviewer",
     "productName": "Jira Viewer",
+    "icon": "build/icon.png",
     "directories": {
       "output": "release"
     },
     "files": [
       "src/**/*",
+      "build/icon.png",
       "package.json"
+    ],
+    "asarUnpack": [
+      "**/node_modules/@github/copilot*/**"
     ],
     "mac": {
       "target": [
-        { "target": "dmg", "arch": ["x64", "arm64"] }
+        {
+          "target": "dmg",
+          "arch": [
+            "x64",
+            "arm64"
+          ]
+        }
       ],
       "category": "public.app-category.productivity"
     },
     "win": {
       "target": [
-        { "target": "nsis", "arch": ["x64"] }
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
       ]
     },
     "linux": {
       "target": [
-        { "target": "AppImage", "arch": ["x64"] }
+        {
+          "target": "AppImage",
+          "arch": [
+            "x64"
+          ]
+        }
       ],
       "category": "Utility"
     },

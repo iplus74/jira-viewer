@@ -6,6 +6,7 @@ const STORAGE_KEYS = {
   token: 'jv.token',
   downloadDir: 'jv.downloadDir',
   githubToken: 'jv.githubToken',
+  aiModels: 'jv.aiModels',
   lastSearch: 'jv.lastSearch'
 };
 
@@ -21,7 +22,8 @@ function loadConfig() {
     email: localStorage.getItem(STORAGE_KEYS.email) || '',
     token: localStorage.getItem(STORAGE_KEYS.token) || '',
     downloadDir: localStorage.getItem(STORAGE_KEYS.downloadDir) || '',
-    githubToken: localStorage.getItem(STORAGE_KEYS.githubToken) || ''
+    githubToken: localStorage.getItem(STORAGE_KEYS.githubToken) || '',
+    aiModels: localStorage.getItem(STORAGE_KEYS.aiModels) || ''
   };
 }
 
@@ -31,6 +33,15 @@ function saveConfig(cfg) {
   localStorage.setItem(STORAGE_KEYS.token, cfg.token || '');
   localStorage.setItem(STORAGE_KEYS.downloadDir, cfg.downloadDir || '');
   localStorage.setItem(STORAGE_KEYS.githubToken, cfg.githubToken || '');
+  localStorage.setItem(STORAGE_KEYS.aiModels, cfg.aiModels || '');
+}
+
+// 콤마로 구분된 모델 목록 문자열을 공백 제거된 배열로 변환
+function parseAiModels(rawValue) {
+  return String(rawValue || '')
+    .split(',')
+    .map((v) => v.trim())
+    .filter(Boolean);
 }
 
 function loadLastSearch() {
@@ -55,6 +66,7 @@ const els = {
   cfgDownloadDir: document.getElementById('cfg-downloadDir'),
   cfgChooseFolder: document.getElementById('cfg-choose-folder'),
   cfgGithubToken: document.getElementById('cfg-githubToken'),
+  cfgAiModels: document.getElementById('cfg-aiModels'),
   cfgSave: document.getElementById('cfg-save'),
   cfgCancel: document.getElementById('cfg-cancel'),
 
@@ -90,6 +102,7 @@ function initSettingsForm() {
   els.cfgToken.value = cfg.token;
   els.cfgDownloadDir.value = cfg.downloadDir;
   els.cfgGithubToken.value = cfg.githubToken;
+  els.cfgAiModels.value = cfg.aiModels;
 }
 
 function initSearchForm() {
@@ -123,7 +136,8 @@ els.cfgSave.addEventListener('click', () => {
     email: els.cfgEmail.value.trim(),
     token: els.cfgToken.value,
     downloadDir: els.cfgDownloadDir.value.trim(),
-    githubToken: els.cfgGithubToken.value.trim()
+    githubToken: els.cfgGithubToken.value.trim(),
+    aiModels: els.cfgAiModels.value.trim()
   });
   els.settingsPanel.classList.add('hidden');
 });
@@ -169,15 +183,15 @@ els.searchBtn.addEventListener('click', async () => {
 function renderIssueList(issues) {
   els.issueList.innerHTML = '';
   if (issues.length === 0) {
-    els.issueList.innerHTML = '<div class="status-msg">조건에 맞는 이슈가 없습니다.</div>';
+    els.issueList.innerHTML = '<div class="my-2.5 text-[13px] text-[#6b778c]">조건에 맞는 이슈가 없습니다.</div>';
     return;
   }
   issues.forEach((issue) => {
     const card = document.createElement('div');
-    card.className = 'issue-card';
+    card.className = 'bg-white border border-[#dfe1e6] rounded-md px-3.5 py-3 cursor-pointer transition-shadow duration-150 ease-in-out hover:shadow-[0_1px_6px_rgba(9,30,66,0.2)]';
     card.innerHTML = `
-      <div class="issue-title">[${issue.key}] ${escapeHtml(issue.summary)}</div>
-      <div class="issue-meta">담당자: ${escapeHtml(issue.assignee)} · 상태: ${escapeHtml(issue.status)}</div>
+      <div class="font-semibold text-[#0052cc] mb-1">[${issue.key}] ${escapeHtml(issue.summary)}</div>
+      <div class="text-[13px] text-[#6b778c]">담당자: ${escapeHtml(issue.assignee)} · 상태: ${escapeHtml(issue.status)}</div>
     `;
     card.addEventListener('click', () => openIssueDetail(issue.key));
     els.issueList.appendChild(card);
@@ -192,11 +206,33 @@ function escapeHtml(str) {
     .replace(/>/g, '&gt;');
 }
 
+// 1초 후 자동으로 사라지는 토스트 팝업 표시
+function showToast(message) {
+  const toast = document.createElement('div');
+  toast.textContent = message;
+  toast.className = 'fixed bottom-6 left-1/2 -translate-x-1/2 bg-[#172b4d] text-white text-sm px-4 py-2 rounded-md shadow-lg z-50';
+  document.body.appendChild(toast);
+  setTimeout(() => toast.remove(), 2000);
+}
+
 function sanitizeHttpUrl(urlValue) {
   if (!urlValue) return '';
   try {
     const parsed = new URL(String(urlValue));
     return parsed.protocol === 'http:' || parsed.protocol === 'https:' ? parsed.toString() : '';
+  } catch {
+    return '';
+  }
+}
+
+// 댓글/설명 내 링크용: http/https 외에 mailto도 허용
+function sanitizeExternalLinkUrl(urlValue) {
+  if (!urlValue) return '';
+  try {
+    const parsed = new URL(String(urlValue));
+    return parsed.protocol === 'http:' || parsed.protocol === 'https:' || parsed.protocol === 'mailto:'
+      ? parsed.toString()
+      : '';
   } catch {
     return '';
   }
@@ -209,20 +245,46 @@ function toFileUrl(filePath) {
   return encodeURI(`file://${normalized}`);
 }
 
-// 첨부파일 마커가 포함된 텍스트를 안전한 HTML로 변환 (마커가 아닌 부분은 escapeHtml 처리)
+// 마크다운 형태의 링크([label](url))를 클릭 가능한 <a> 태그로 변환 (http/https/mailto만 허용, 나머지 텍스트는 escapeHtml 처리)
+// label 안에 대괄호가 포함된 경우([KAN-811] 처럼)도 매칭되도록 지연(lazy) 매칭 사용
+function linkifyText(text) {
+  const LINK_REGEX = /\[([\s\S]*?)\]\((https?:\/\/[^\s)]+|mailto:[^\s)]+)\)/g;
+  const input = text || '';
+  let result = '';
+  let lastIndex = 0;
+  let match;
+  while ((match = LINK_REGEX.exec(input)) !== null) {
+    if (match.index > lastIndex) {
+      result += escapeHtml(input.slice(lastIndex, match.index));
+    }
+    const safeUrl = sanitizeExternalLinkUrl(match[2]);
+    if (safeUrl) {
+      result += `<a href="#" data-role="ext-link" data-url="${escapeHtml(safeUrl)}" class="text-[#0052cc] underline">${escapeHtml(match[1] || match[2])}</a>`;
+    } else {
+      result += escapeHtml(match[0]);
+    }
+    lastIndex = LINK_REGEX.lastIndex;
+  }
+  if (lastIndex < input.length) {
+    result += escapeHtml(input.slice(lastIndex));
+  }
+  return result;
+}
+
+// 첨부파일 마커가 포함된 텍스트를 안전한 HTML로 변환 (마커가 아닌 부분은 링크/escapeHtml 처리)
 function renderTextWithAttachments(text) {
   const segments = window.attachmentUtil.splitAttachmentMarkers(text || '');
   return segments
     .map((seg) => {
       if (seg.type !== 'attachment') {
-        return escapeHtml(seg.value);
+        return linkifyText(seg.value);
       }
       const fileUrl = toFileUrl(seg.path);
       const safeFilename = escapeHtml(seg.filename);
       if (seg.kind === 'image') {
-        return `<div class="attachment-block"><img src="${fileUrl}" alt="${safeFilename}" class="attachment-img" /><div class="attachment-caption">${safeFilename}</div></div>`;
+        return `<div class="my-2.5"><img src="${fileUrl}" alt="${safeFilename}" class="max-w-full border border-[#dfe1e6] rounded block" /><div class="text-xs text-[#6b778c] mt-1">${safeFilename}</div></div>`;
       }
-      return `<button type="button" class="attachment-file-link" data-path="${escapeHtml(seg.path)}">📎 ${safeFilename}</button>`;
+      return `<button type="button" data-role="attachment-file-link" data-path="${escapeHtml(seg.path)}" class="inline-flex items-center gap-1.5 my-1.5 px-2.5 py-1.5 bg-[#f4f5f7] border border-[#dfe1e6] rounded text-[13px] text-[#0052cc] hover:bg-[#ebecf0] cursor-pointer">📎 ${safeFilename}</button>`;
     })
     .join('');
 }
@@ -231,7 +293,7 @@ function renderTextWithAttachments(text) {
 async function openIssueDetail(issueKey) {
   state.currentIssueKey = issueKey;
   showScreen('detail');
-  els.issueDetail.innerHTML = '<div class="status-msg">불러오는 중...</div>';
+  els.issueDetail.innerHTML = '<div class="my-2.5 text-[13px] text-[#6b778c]">불러오는 중...</div>';
 
   try {
     const payload = { ...getJiraConfigPayload(), issueKey };
@@ -242,7 +304,7 @@ async function openIssueDetail(issueKey) {
     renderIssueDetail(detail);
     renderStatusOptions(transitions, detail.status);
   } catch (err) {
-    els.issueDetail.innerHTML = `<div class="status-msg">오류: ${escapeHtml(err.message)}</div>`;
+    els.issueDetail.innerHTML = `<div class="my-2.5 text-[13px] text-[#6b778c]">오류: ${escapeHtml(err.message)}</div>`;
   }
 }
 
@@ -267,23 +329,23 @@ function renderIssueDetail(detail) {
   const safeWebUrl = sanitizeHttpUrl(detail.webUrl);
   let commentsHtml = '';
   if (!detail.comments || detail.comments.length === 0) {
-    commentsHtml = '<div class="status-msg">등록된 댓글이 없습니다.</div>';
+    commentsHtml = '<div class="my-2.5 text-[13px] text-[#6b778c]">등록된 댓글이 없습니다.</div>';
   } else {
     commentsHtml = detail.comments
       .map((c) => {
         const repliesHtml = (c.replies || [])
           .map(
             (r) => `
-          <div class="comment-reply">
-            <div class="comment-meta">#${r.index} ${escapeHtml(r.author)} · ${new Date(r.created).toLocaleString('ko-KR')} [답글]</div>
-            <div class="comment-text">${renderTextWithAttachments(r.text)}</div>
+          <div class="ml-5 mt-2 mb-5 border-l-[3px] border-[#c1c7d0] pl-3">
+            <div class="text-xs text-[#6b778c] mb-1">#${r.index} ${escapeHtml(r.author)} · ${new Date(r.created).toLocaleString('ko-KR')} [답글]</div>
+            <div class="whitespace-pre-wrap leading-normal">${renderTextWithAttachments(r.text)}</div>
           </div>`
           )
           .join('');
         return `
-        <div class="comment-block">
-          <div class="comment-meta">#${c.index} ${escapeHtml(c.author)} · ${new Date(c.created).toLocaleString('ko-KR')}</div>
-          <div class="comment-text">${renderTextWithAttachments(c.text)}</div>
+        <div class="border-l-[3px] border-[#dfe1e6] pl-3 mb-5">
+          <div class="text-xs text-[#6b778c] mb-1">#${c.index} ${escapeHtml(c.author)} · ${new Date(c.created).toLocaleString('ko-KR')}</div>
+          <div class="whitespace-pre-wrap leading-normal">${renderTextWithAttachments(c.text)}</div>
           ${repliesHtml}
         </div>`;
       })
@@ -291,11 +353,13 @@ function renderIssueDetail(detail) {
   }
 
   els.issueDetail.innerHTML = `
-    <h2>[${detail.key}] ${escapeHtml(detail.summary)}</h2>
-    <div class="status-msg">담당자: ${escapeHtml(detail.assignee)} · 상태: ${escapeHtml(detail.status)} · <a href="#" id="detail-webUrl">${escapeHtml(safeWebUrl || '유효하지 않은 URL')}</a></div>
-    <div class="issue-desc">${renderTextWithAttachments(detail.description)}</div>
-    <h3>댓글 (총 ${detail.comments ? detail.comments.length : 0}개)</h3>
-    ${commentsHtml}
+    <h2 class="mt-0 shrink-0">[${detail.key}] ${escapeHtml(detail.summary)}</h2>
+    <div class="shrink-0 my-2.5 text-[13px] text-[#6b778c]">담당자: ${escapeHtml(detail.assignee)} · 상태: ${escapeHtml(detail.status)} · <a href="#" id="detail-webUrl">${escapeHtml(safeWebUrl || '유효하지 않은 URL')}</a></div>
+    <div class="flex-1 min-h-0 overflow-y-auto">
+      <div class="whitespace-pre-wrap leading-[1.6] border-t border-b border-[#dfe1e6] py-3 my-3">${renderTextWithAttachments(detail.description)}</div>
+      <h3>댓글 (총 ${detail.comments ? detail.comments.length : 0}개)</h3>
+      ${commentsHtml}
+    </div>
   `;
 
   const link = document.getElementById('detail-webUrl');
@@ -303,7 +367,7 @@ function renderIssueDetail(detail) {
     link.addEventListener('click', (e) => {
       e.preventDefault();
       if (!safeWebUrl) return;
-      window.jiraApi.openInBrowser(safeWebUrl);
+      window.jiraApi.openInBrowser(safeWebUrl).catch((err) => showToast(`링크를 열 수 없습니다: ${err.message}`));
     });
   }
 }
@@ -314,9 +378,15 @@ els.backBtn.addEventListener('click', () => {
 
 // 본문/댓글에 삽입된 첨부파일(이미지 외 파일) 클릭 시 기본 프로그램으로 열기
 els.issueDetail.addEventListener('click', (e) => {
-  const btn = e.target.closest('.attachment-file-link');
+  const btn = e.target.closest('[data-role="attachment-file-link"]');
   if (btn && btn.dataset.path) {
     window.jiraApi.openPath(btn.dataset.path);
+    return;
+  }
+  const link = e.target.closest('[data-role="ext-link"]');
+  if (link && link.dataset.url) {
+    e.preventDefault();
+    window.jiraApi.openInBrowser(link.dataset.url).catch((err) => showToast(`링크를 열 수 없습니다: ${err.message}`));
   }
 });
 
@@ -337,6 +407,7 @@ els.statusApplyBtn.addEventListener('click', async () => {
     renderIssueDetail(detail);
     const transitions = await window.jiraApi.getTransitions({ ...getJiraConfigPayload(), issueKey: state.currentIssueKey });
     renderStatusOptions(transitions, detail.status);
+    showToast('적용되었습니다');
   } catch (err) {
     alert(`상태 변경 실패: ${err.message}`);
   } finally {
@@ -352,7 +423,14 @@ async function loadSummary(forceRefresh) {
   els.aiSummaryText.textContent = '';
 
   try {
-    const payload = { ...getJiraConfigPayload(), issueKey: state.currentIssueKey, forceRefresh, githubToken: loadConfig().githubToken };
+    const cfg = loadConfig();
+    const payload = {
+      ...getJiraConfigPayload(),
+      issueKey: state.currentIssueKey,
+      forceRefresh,
+      githubToken: cfg.githubToken,
+      aiModels: parseAiModels(cfg.aiModels)
+    };
     const result = await window.jiraApi.getSummary(payload);
     els.aiSummaryText.textContent = result.summary;
     const generated = new Date(result.generatedAt).toLocaleString('ko-KR');
