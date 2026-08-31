@@ -21,30 +21,22 @@
   "devDependencies": {
     "@tailwindcss/cli": "^4.3.3",
     "electron": "^32.0.0",
-    "electron-builder": "^25.0.0",
+    "electron-builder": "^26.15.3",
     "tailwindcss": "^4.3.3"
   },
   "build": {
     "appId": "com.wecostay.jiraviewer",
     "productName": "Jira Viewer",
-    "icon": "build/icon.png",
-    "directories": {
-      "output": "release"
-    },
-    "files": [
-      "src/**/*",
-      "build/icon.png",
-      "package.json"
-    ],
+    "asar": true,
     "asarUnpack": [
-      "**/node_modules/@github/copilot*/**"
+      "**/node_modules/@github/**/*"
     ],
     "mac": {
+      "icon": "build/icon.icns",
       "target": [
         {
           "target": "dmg",
           "arch": [
-            "x64",
             "arm64"
           ]
         }
@@ -52,24 +44,12 @@
       "category": "public.app-category.productivity"
     },
     "win": {
-      "target": [
-        {
-          "target": "nsis",
-          "arch": [
-            "x64"
-          ]
-        }
-      ]
+      "icon": "build/icon.png",
+      "target": "nsis"
     },
     "linux": {
-      "target": [
-        {
-          "target": "AppImage",
-          "arch": [
-            "x64"
-          ]
-        }
-      ],
+      "icon": "build/icon.png",
+      "target": "AppImage",
       "category": "Utility"
     },
     "nsis": {
