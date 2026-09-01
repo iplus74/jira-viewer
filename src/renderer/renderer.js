@@ -84,6 +84,7 @@ const els = {
   statusSelect: document.getElementById('status-select'),
   statusApplyBtn: document.getElementById('status-apply-btn'),
   aiSummaryBtn: document.getElementById('ai-summary-btn'),
+  refreshDetailBtn: document.getElementById('refresh-detail-btn'),
   openBrowserBtn: document.getElementById('open-browser-btn'),
   issueDetail: document.getElementById('issue-detail'),
 
@@ -394,6 +395,12 @@ els.openBrowserBtn.addEventListener('click', () => {
   if (state.currentIssueKey) {
     const cfg = loadConfig();
     window.jiraApi.openInBrowser(`${cfg.jiraUrl}/browse/${state.currentIssueKey}`);
+  }
+});
+
+els.refreshDetailBtn.addEventListener('click', () => {
+  if (state.currentIssueKey) {
+    openIssueDetail(state.currentIssueKey);
   }
 });
 
