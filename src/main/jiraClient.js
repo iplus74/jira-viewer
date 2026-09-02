@@ -502,24 +502,23 @@ async function searchMentionedIssues(config, { email, statusKey = 'default', max
     throw new Error(`이메일(${email})에 해당하는 Jira 사용자를 찾을 수 없습니다.`);
   }
 
-  let statusClause;
+  const clauses = [`assignee != "${accountId}"`];
   let statusDesc;
-  if (statusKey === 'all' || statusKey === '전체') {
-    statusClause = '';
+
+  if (statusKey === 'default' || statusKey === '백로그·진행 중·검토 중') {
+    clauses.push('status IN ("Backlog", "In Progress", "테스트 요청", "백로그", "진행 중", "Test Request")');
+    statusDesc = '백로그/진행 중/테스트 요청';
+  } else if (statusKey === 'all' || statusKey === '전체') {
     statusDesc = '모든 상태';
   } else {
     const built = buildStatusClause(statusKey);
-    // 맨션 검색 기본값은 원본 스크립트와 동일하게 백로그/진행 중/테스트 요청 상태를 사용
-    statusClause =
-      statusKey === 'default' || statusKey === '백로그·진행 중·검토 중'
-        ? 'IN ("Backlog", "In Progress", "테스트 요청", "백로그", "진행 중", "Test Request")'
-        : built.clause.replace(/^AND status /, '');
     statusDesc = built.desc;
+    if (built.clause) {
+      clauses.push(built.clause.replace(/^AND\s+/, ''));
+    }
   }
 
-  const jql = `status ${statusClause} AND assignee != "${accountId}" ORDER BY created DESC`
-    .trim()
-    .replace(/\s+/g, ' ');
+  const jql = `${clauses.join(' AND ')} ORDER BY created DESC`.trim().replace(/\s+/g, ' ');
 
   const searchUrl = new URL(`${config.jiraUrl}/rest/api/3/search/jql`);
   searchUrl.searchParams.append('jql', jql);
@@ -622,6 +621,14 @@ async function getIssueDetail(issueKey, config, downloadDir = null) {
     });
   }
 
+  const attachmentList = (fields.attachment || []).map((att) => ({
+    id: att.id,
+    filename: att.filename,
+    mimeType: att.mimeType,
+    size: att.size,
+    content: att.content
+  }));
+
   return {
     key: issueKey,
     summary,
@@ -630,6 +637,7 @@ async function getIssueDetail(issueKey, config, downloadDir = null) {
     webUrl,
     description: descriptionText,
     comments: commentList,
+    attachments: attachmentList,
     updated: data.fields?.updated || null,
     rawUpdated: data.fields?.updated
   };

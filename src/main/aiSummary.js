@@ -119,7 +119,8 @@ async function saveSummary(issueKey, summaryRecord) {
 function buildSummaryPrompt(issueDetail) {
   const issueMarkdown = buildIssueMarkdown(issueDetail);
 
-  return `다음 Jira Issue 내용 및 댓글 정보(Markdown)에서 설명과 댓글을 읽어 작업자(${issueDetail.assignee || '담당자'})가 해야 할 업무 내용을 정리해 주세요.
+  return `다음 Jira Issue 내용, 댓글 정보 및 첨부파일 정보(Markdown)에서 설명과 댓글을 읽어 작업자(${issueDetail.assignee || '담당자'})가 해야 할 업무 내용을 정리해 주세요.
+- 이슈 설명이나 댓글에 포함되거나 이슈에 등록된 첨부파일/이미지가 있을 경우, 요약 결과물의 "첨부 파일 및 참고 자료" 항목에 누락 없이 마크다운 파일/이미지 링크 형식(\`[📎 파일명](./files/파일명)\` 또는 \`![파일명](./files/파일명)\`)으로 포함해 주세요.
 결과물은 Markdown 서식으로 작성해 주세요.
 
 ---
@@ -253,6 +254,15 @@ function convertMarkersToMarkdownLinks(text, baseDirRelative = 'files') {
     .join('');
 }
 
+function formatBytes(bytes, decimals = 1) {
+  if (!bytes || bytes === 0) return '0 B';
+  const k = 1024;
+  const dm = decimals < 0 ? 0 : decimals;
+  const sizes = ['B', 'KB', 'MB', 'GB'];
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+  return `${parseFloat((bytes / Math.pow(k, i)).toFixed(dm))} ${sizes[i]}`;
+}
+
 function buildIssueMarkdown(issueDetail) {
   const comments = issueDetail.comments || [];
   let commentsText = '';
@@ -287,6 +297,19 @@ function buildIssueMarkdown(issueDetail) {
 
   const descFormatted = convertMarkersToMarkdownLinks(issueDetail.description, 'files');
 
+  let attachmentSection = '';
+  if (Array.isArray(issueDetail.attachments) && issueDetail.attachments.length > 0) {
+    const listText = issueDetail.attachments
+      .map((att) => {
+        const sizeStr = att.size ? ` (${formatBytes(att.size)})` : '';
+        const relPath = `./files/${att.id}_${att.filename}`;
+        const safeUrl = encodeMarkdownUrl(relPath);
+        return `- [📎 ${att.filename}](${safeUrl})${sizeStr}`;
+      })
+      .join('\n');
+    attachmentSection = `\n---\n\n## 첨부파일 (총 ${issueDetail.attachments.length}개)\n\n${listText}\n`;
+  }
+
   return `# 이슈 상세 정보 [${issueDetail.key}]
 
 - **제목**: ${issueDetail.summary || ''}
@@ -305,7 +328,7 @@ ${(descFormatted || '설명 없음').trim()}
 ## 댓글 (총 ${comments.length}개)
 
 ${commentsText}
-`;
+${attachmentSection}`;
 }
 
 function resolveAgyCliPath() {
@@ -466,7 +489,8 @@ async function getOrCreateSummary(issueDetail, forceRefresh = false, githubToken
     }
   }
 
-  const summaryText = await generateSummaryText(issueDetail, githubToken, models);
+  const rawSummaryText = await generateSummaryText(issueDetail, githubToken, models);
+  const summaryText = autoLinkAttachments(rawSummaryText);
   const record = {
     issueKey,
     summary: summaryText,
