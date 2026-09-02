@@ -34,21 +34,49 @@
         </div>
       </div>
       <div class="mb-2.5 flex flex-col gap-1 max-w-[480px]">
-        <label class="text-[13px] font-semibold text-[#42526e]">GitHub 토큰 (AI 요약용)</label>
-        <input type="password" id="cfg-githubToken" placeholder="Copilot 사용 가능한 GitHub 토큰 (선택)" class="px-2.5 py-2 border border-[#dfe1e6] rounded text-sm" />
+        <label class="text-[13px] font-semibold text-[#42526e]">AI 요약 모듈 선택</label>
+        <select id="cfg-aiModule" class="px-2.5 py-2 border border-[#dfe1e6] rounded text-sm">
+          <option value="copilot">Github Copilot SDK</option>
+          <option value="antigravity">Antigravity cli 사용</option>
+        </select>
+      </div>
+      <div id="copilot-settings-group">
+        <div class="mb-2.5 flex flex-col gap-1 max-w-[480px]">
+          <label class="text-[13px] font-semibold text-[#42526e]">GitHub 토큰 (Copilot AI 요약용)</label>
+          <input type="password" id="cfg-githubToken" placeholder="Copilot 사용 가능한 GitHub 토큰 (선택)" class="px-2.5 py-2 border border-[#dfe1e6] rounded text-sm" />
+        </div>
+        <div class="mb-2.5 flex flex-col gap-1 max-w-[480px]">
+          <small>토큰을 비워두면 로컬에 로그인된 Copilot CLI(`copilot login`) 인증을 사용합니다. 입력 시 반드시 유효한 토큰이어야 합니다(Bad credentials 오류 시 토큰 값을 확인하거나 비워 두세요).</small>
+        </div>
+        <div class="mb-2.5 flex flex-col gap-1 max-w-[480px]">
+          <label class="text-[13px] font-semibold text-[#42526e]">AI 요약 작업 모델 목록</label>
+          <input type="text" id="cfg-aiModels" placeholder="예: gpt-4o, claude-3.5-sonnet (콤마로 구분)" class="px-2.5 py-2 border border-[#dfe1e6] rounded text-sm" />
+        </div>
+        <div class="mb-2.5 flex flex-col gap-1 max-w-[480px]">
+          <small>콤마로 구분해 여러 모델을 지정하면 앞에서부터 순서대로 시도하며, 실패 시 다음 모델로 넘어갑니다. 비워두면 기본 모델을 사용합니다.</small>
+        </div>
+      </div>
+      <div id="antigravity-settings-group" class="hidden">
+        <div class="mb-2.5 flex flex-col gap-1 max-w-[480px]">
+          <label class="text-[13px] font-semibold text-[#42526e]">Antigravity SKILL</label>
+          <input type="text" id="cfg-agySkill" placeholder="예: jira-ai-task (기본값: jira-ai-task)" class="px-2.5 py-2 border border-[#dfe1e6] rounded text-sm" />
+        </div>
+        <div class="mb-2.5 flex flex-col gap-1 max-w-[480px]">
+          <small>CLI 실행 시 호출할 SKILL 이름을 지정합니다. (비워두면 기본값 <code>jira-ai-task</code> 사용)</small>
+        </div>
+        <div class="mb-2.5 flex flex-col gap-1 max-w-[480px]">
+          <label class="text-[13px] font-semibold text-[#42526e]">Antigravity cli 작업 폴더</label>
+          <div class="flex gap-2">
+            <input type="text" id="cfg-agyWorkDir" placeholder="예: /Users/yangsukim/data/work/house_sara/jira-tasks" readonly class="flex-1 px-2.5 py-2 border border-[#dfe1e6] rounded text-sm bg-[#fafbfc]" />
+            <button id="cfg-choose-agy-folder" class="cursor-pointer border-0 rounded px-3.5 py-2 text-sm bg-[#dfe1e6] text-[#172b4d]">폴더 선택</button>
+          </div>
+        </div>
+        <div class="mb-2.5 flex flex-col gap-1 max-w-[480px]">
+          <small>지정된 폴더 하위의 <code>issues/{오늘날짜}/view_{이슈키}.md</code> 및 <code>tasks/{오늘날짜}/task_{이슈키}.md</code> 경로를 사용합니다.</small>
+        </div>
       </div>
       <div class="mb-2.5 flex flex-col gap-1 max-w-[480px]">
-        <small>토큰을 비워두면 로컬에 로그인된 Copilot CLI(`copilot login`) 인증을 사용합니다. 입력 시 반드시 유효한 토큰이어야 합니다(Bad credentials 오류 시 토큰 값을 확인하거나 비워 두세요).</small>
-      </div>
-      <div class="mb-2.5 flex flex-col gap-1 max-w-[480px]">
-        <label class="text-[13px] font-semibold text-[#42526e]">AI 요약 작업 모델 목록</label>
-        <input type="text" id="cfg-aiModels" placeholder="예: gpt-4o, claude-3.5-sonnet (콤마로 구분)" class="px-2.5 py-2 border border-[#dfe1e6] rounded text-sm" />
-      </div>
-      <div class="mb-2.5 flex flex-col gap-1 max-w-[480px]">
-        <small>콤마로 구분해 여러 모델을 지정하면 앞에서부터 순서대로 시도하며, 실패 시 다음 모델로 넘어갑니다. 비워두면 기본 모델을 사용합니다.</small>
-      </div>
-      <div class="mb-2.5 flex flex-col gap-1 max-w-[480px]">
-        <small>토큰은 브라우저 localStorage에 저장됩니다. 공용 PC에서는 사용 후 삭제를 권장합니다.</small>
+        <small>토큰 및 설정은 브라우저 localStorage에 저장됩니다. 공용 PC에서는 사용 후 삭제를 권장합니다.</small>
       </div>
       <div class="flex gap-2 mt-2">
         <button id="cfg-save" class="cursor-pointer border-0 rounded px-3.5 py-2 text-sm bg-[#0052cc] text-white">저장</button>
@@ -108,14 +136,14 @@
   </div>
 
   <div id="ai-summary-modal" class="fixed inset-0 bg-[rgba(9,30,66,0.54)] flex items-center justify-center hidden">
-    <div class="bg-white rounded-md w-[600px] max-w-[90vw] max-h-[80vh] flex flex-col">
+    <div class="bg-white rounded-md w-[720px] max-w-[90vw] max-h-[85vh] flex flex-col">
       <div class="flex justify-between items-center px-[18px] py-3.5 border-b border-[#dfe1e6]">
         <h3>AI 업무 요약</h3>
         <button id="ai-modal-close" class="cursor-pointer border-0 rounded px-3.5 py-2 text-sm bg-[#dfe1e6] text-[#172b4d]">닫기</button>
       </div>
       <div class="px-[18px] py-3.5 overflow-y-auto">
         <div id="ai-summary-meta" class="my-2.5 text-[13px] text-[#6b778c]"></div>
-        <pre id="ai-summary-text" class="whitespace-pre-wrap leading-[1.6] [font-family:inherit]"></pre>
+        <div id="ai-summary-text" class="markdown-body"></div>
       </div>
       <div class="px-[18px] py-3 border-t border-[#dfe1e6] flex justify-end">
         <button id="ai-refresh-btn" class="cursor-pointer border-0 rounded px-3.5 py-2 text-sm bg-[#dfe1e6] text-[#172b4d]">다시 생성</button>

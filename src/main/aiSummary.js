@@ -117,28 +117,14 @@ async function saveSummary(issueKey, summaryRecord) {
 }
 
 function buildSummaryPrompt(issueDetail) {
-  const commentsText = (issueDetail.comments || [])
-    .map((c) => {
-      const replies = (c.replies || [])
-        .map((r) => `    - 답글(${r.author}, ${r.created}): ${r.text}`)
-        .join('\n');
-      return `- 댓글(${c.author}, ${c.created}): ${c.text}${replies ? `\n${replies}` : ''}`;
-    })
-    .join('\n');
+  const issueMarkdown = buildIssueMarkdown(issueDetail);
 
-  return `다음은 Jira 이슈 정보입니다. 담당자(${issueDetail.assignee})가 처리해야 할 업무 내용을 한국어로 간결하게 정리해 주세요.
-불릿 포인트 형식으로 "해야 할 일", "참고 사항", "다음 액션"을 구분하여 작성하세요.
+  return `다음 Jira Issue 내용 및 댓글 정보(Markdown)에서 설명과 댓글을 읽어 작업자(${issueDetail.assignee || '담당자'})가 해야 할 업무 내용을 정리해 주세요.
+결과물은 Markdown 서식으로 작성해 주세요.
 
-이슈 키: ${issueDetail.key}
-제목: ${issueDetail.summary}
-상태: ${issueDetail.status}
-URL: ${issueDetail.webUrl}
+---
 
-[설명]
-${issueDetail.description}
-
-[댓글]
-${commentsText || '등록된 댓글이 없습니다.'}
+${issueMarkdown}
 `;
 }
 
@@ -233,6 +219,232 @@ function sanitizeGithubToken(rawToken) {
     .trim();
 }
 
+const { execFile } = require('child_process');
+const { splitAttachmentMarkers } = require('../shared/attachmentMarker');
+
+function getTodayString() {
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = String(now.getMonth() + 1).padStart(2, '0');
+  const day = String(now.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+function encodeMarkdownUrl(url) {
+  return encodeURI(url).replace(/\(/g, '%28').replace(/\)/g, '%29');
+}
+
+function convertMarkersToMarkdownLinks(text, baseDirRelative = 'files') {
+  const segments = splitAttachmentMarkers(text || '');
+  return segments
+    .map((seg) => {
+      if (seg.type !== 'attachment') {
+        return seg.value;
+      }
+      const filename = seg.filename || (seg.path ? path.basename(seg.path) : 'file');
+      const basename = seg.path ? path.basename(seg.path) : filename;
+      const rawRelPath = `./${baseDirRelative}/${basename}`;
+      const safeRelPath = encodeMarkdownUrl(rawRelPath);
+      if (seg.kind === 'image') {
+        return `\n![${filename}](${safeRelPath})\n`;
+      }
+      return `[📎 ${filename}](${safeRelPath})`;
+    })
+    .join('');
+}
+
+function buildIssueMarkdown(issueDetail) {
+  const comments = issueDetail.comments || [];
+  let commentsText = '';
+
+  if (comments.length === 0) {
+    commentsText = '등록된 댓글이 없습니다.';
+  } else {
+    commentsText = comments
+      .map((c) => {
+        const author = c.author || '알 수 없음';
+        const created = c.created ? new Date(c.created).toLocaleString('ko-KR') : '';
+        const parentFormatted = convertMarkersToMarkdownLinks(c.text, 'files');
+        const parentText = parentFormatted.replace(/\n/g, '\n> ');
+        let block = `### #${c.index || 1} 작성자: ${author} (${created})\n\n> ${parentText}\n`;
+
+        if (Array.isArray(c.replies) && c.replies.length > 0) {
+          const repliesText = c.replies
+            .map((r) => {
+              const rAuthor = r.author || '알 수 없음';
+              const rCreated = r.created ? new Date(r.created).toLocaleString('ko-KR') : '';
+              const childFormatted = convertMarkersToMarkdownLinks(r.text, 'files');
+              const childText = childFormatted.replace(/\n/g, '\n>> ');
+              return `\n#### #${r.index || 1} 작성자: ${rAuthor} (${rCreated}) [답글]\n\n>> ${childText}\n`;
+            })
+            .join('');
+          block += repliesText;
+        }
+        return block;
+      })
+      .join('\n');
+  }
+
+  const descFormatted = convertMarkersToMarkdownLinks(issueDetail.description, 'files');
+
+  return `# 이슈 상세 정보 [${issueDetail.key}]
+
+- **제목**: ${issueDetail.summary || ''}
+- **담당자**: ${issueDetail.assignee || ''}
+- **상태**: ${issueDetail.status || ''}
+- **URL**: ${issueDetail.webUrl || ''}
+
+---
+
+## 설명
+
+${(descFormatted || '설명 없음').trim()}
+
+---
+
+## 댓글 (총 ${comments.length}개)
+
+${commentsText}
+`;
+}
+
+function resolveAgyCliPath() {
+  const home = process.env.HOME || process.env.USERPROFILE || '';
+  const candidates = [
+    path.join(home, '.local', 'bin', 'agy'),
+    '/usr/local/bin/agy',
+    '/opt/homebrew/bin/agy'
+  ];
+
+  for (const c of candidates) {
+    try {
+      if (fsSync.existsSync(c)) {
+        return c;
+      }
+    } catch {
+      // ignore
+    }
+  }
+  return 'agy';
+}
+
+function getAgyEnv() {
+  const home = process.env.HOME || process.env.USERPROFILE || '';
+  const extraPaths = [
+    path.join(home, '.local', 'bin'),
+    '/opt/homebrew/bin',
+    '/usr/local/bin',
+    '/usr/bin',
+    '/bin',
+    '/usr/sbin',
+    '/sbin'
+  ];
+
+  const currentPath = process.env.PATH || '';
+  const mergedPath = Array.from(new Set([...extraPaths, ...currentPath.split(':')])).join(':');
+
+  return {
+    ...process.env,
+    PATH: mergedPath
+  };
+}
+
+function runAntigravityCli(issueKey, workDir, agySkill) {
+  return new Promise((resolve, reject) => {
+    const agyPath = resolveAgyCliPath();
+    const skillName = (agySkill && agySkill.trim()) || 'jira-ai-task';
+    const args = ['--print', `${skillName} ${issueKey}`, '--dangerously-skip-permissions'];
+
+    execFile(
+      agyPath,
+      args,
+      {
+        cwd: workDir,
+        env: getAgyEnv(),
+        timeout: 300000,
+        maxBuffer: 10 * 1024 * 1024
+      },
+      (error, stdout, stderr) => {
+        if (error) {
+          console.error(`Antigravity CLI 실행 실패: ${error.message}`);
+          if (stderr) console.error(`CLI stderr: ${stderr}`);
+          return reject(
+            new Error(`Antigravity CLI 실행 중 오류가 발생했습니다: ${error.message}${stderr ? `\n${stderr}` : ''}`)
+          );
+        }
+        resolve(stdout);
+      }
+    );
+  });
+}
+
+function autoLinkAttachments(summaryText) {
+  if (!summaryText) return '';
+  const REGEX = /`?(\d+_[^`\n\r]+?\.(?:png|jpg|jpeg|gif|pdf|zip|docx|xlsx|pptx|txt|webp|svg))`?/gi;
+
+  return summaryText.replace(REGEX, (match, filename, offset, string) => {
+    const prevStr = string.slice(Math.max(0, offset - 20), offset);
+    if (prevStr.includes('](') || prevStr.includes(']<')) {
+      return match;
+    }
+    const relPath = `./files/${filename}`;
+    const safeUrl = encodeMarkdownUrl(relPath);
+    return `[📎 ${filename}](${safeUrl})`;
+  });
+}
+
+async function getOrCreateAntigravitySummary(issueDetail, forceRefresh = false, agyWorkDir, agySkill) {
+  const baseDir = (agyWorkDir && agyWorkDir.trim()) || '/Users/yangsukim/data/work/house_sara/jira-tasks';
+  const todayStr = getTodayString();
+  const issueKey = issueDetail.key;
+
+  const tasksDir = path.join(baseDir, 'tasks', todayStr);
+  const issuesDir = path.join(baseDir, 'issues', todayStr);
+
+  const taskFilePath = path.join(tasksDir, `task_${issueKey}.md`);
+  const issueFilePath = path.join(issuesDir, `view_${issueKey}.md`);
+
+  // Step 1 & Step 2: 작업 요약 파일이 이미 존재하고 강제 새로고침이 아닌 경우
+  if (!forceRefresh && fsSync.existsSync(taskFilePath)) {
+    const summaryText = autoLinkAttachments(await fs.readFile(taskFilePath, 'utf-8'));
+    const stat = await fs.stat(taskFilePath);
+    return {
+      issueKey,
+      summary: summaryText,
+      generatedAt: stat.mtimeMs,
+      filePath: taskFilePath,
+      fromCache: true,
+      module: 'antigravity'
+    };
+  }
+
+  // Step 3: 파일이 없거나 강제 새로고침인 경우
+  // 3-1) 이슈 상세 마크다운 파일 저장
+  await fs.mkdir(issuesDir, { recursive: true });
+  const issueMarkdown = buildIssueMarkdown(issueDetail);
+  await fs.writeFile(issueFilePath, issueMarkdown, 'utf-8');
+
+  // 3-2) Antigravity CLI 실행 (작업 디렉터리: baseDir)
+  await fs.mkdir(tasksDir, { recursive: true });
+  await runAntigravityCli(issueKey, baseDir, agySkill);
+
+  // 3-3) 생성된 결과 파일 확인
+  if (!fsSync.existsSync(taskFilePath)) {
+    throw new Error(`Antigravity CLI 작업이 완료되었으나 요약 파일(${taskFilePath})을 찾을 수 없습니다.`);
+  }
+
+  const summaryText = autoLinkAttachments(await fs.readFile(taskFilePath, 'utf-8'));
+  const stat = await fs.stat(taskFilePath);
+  return {
+    issueKey,
+    summary: summaryText,
+    generatedAt: stat.mtimeMs,
+    filePath: taskFilePath,
+    fromCache: false,
+    module: 'antigravity'
+  };
+}
+
 /**
  * 이슈 요약을 조회하거나 새로 생성합니다.
  * @param {object} issueDetail - jiraClient.getIssueDetail() 결과
@@ -250,7 +462,7 @@ async function getOrCreateSummary(issueDetail, forceRefresh = false, githubToken
     const summaryUpdatedAt = existing.issueUpdatedAt;
     // 요약 생성 시점 이후 이슈가 변경되지 않았으면 기존 요약 재사용
     if (!issueUpdatedAt || !summaryUpdatedAt || issueUpdatedAt <= summaryUpdatedAt) {
-      return { ...existing, fromCache: true };
+      return { ...existing, fromCache: true, module: 'copilot' };
     }
   }
 
@@ -259,7 +471,8 @@ async function getOrCreateSummary(issueDetail, forceRefresh = false, githubToken
     issueKey,
     summary: summaryText,
     generatedAt: Date.now(),
-    issueUpdatedAt: issueUpdatedAt || Date.now()
+    issueUpdatedAt: issueUpdatedAt || Date.now(),
+    module: 'copilot'
   };
   const filePath = await saveSummary(issueKey, record);
   return { ...record, filePath, fromCache: false };
@@ -270,5 +483,8 @@ module.exports = {
   getSummaryFilePath,
   readExistingSummary,
   saveSummary,
-  getOrCreateSummary
+  getOrCreateSummary,
+  getOrCreateAntigravitySummary,
+  getTodayString,
+  buildIssueMarkdown
 };

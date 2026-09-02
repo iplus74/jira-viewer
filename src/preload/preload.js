@@ -10,6 +10,7 @@ contextBridge.exposeInMainWorld('jiraApi', {
   transitionIssue: (payload) => ipcRenderer.invoke('jira:transitionIssue', payload),
   openInBrowser: (webUrl) => ipcRenderer.invoke('jira:openInBrowser', webUrl),
   getSummary: (payload) => ipcRenderer.invoke('ai:getSummary', payload),
+  renderMarkdown: (markdownText) => ipcRenderer.invoke('util:renderMarkdown', markdownText),
   chooseDownloadFolder: () => ipcRenderer.invoke('settings:chooseDownloadFolder'),
   openPath: (filePath) => ipcRenderer.invoke('shell:openPath', filePath)
 });

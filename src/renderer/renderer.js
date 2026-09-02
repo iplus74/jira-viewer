@@ -5,8 +5,11 @@ const STORAGE_KEYS = {
   email: 'jv.email',
   token: 'jv.token',
   downloadDir: 'jv.downloadDir',
+  aiModule: 'jv.aiModule',
   githubToken: 'jv.githubToken',
   aiModels: 'jv.aiModels',
+  agySkill: 'jv.agySkill',
+  agyWorkDir: 'jv.agyWorkDir',
   lastSearch: 'jv.lastSearch'
 };
 
@@ -22,8 +25,11 @@ function loadConfig() {
     email: localStorage.getItem(STORAGE_KEYS.email) || '',
     token: localStorage.getItem(STORAGE_KEYS.token) || '',
     downloadDir: localStorage.getItem(STORAGE_KEYS.downloadDir) || '',
+    aiModule: localStorage.getItem(STORAGE_KEYS.aiModule) || 'copilot',
     githubToken: localStorage.getItem(STORAGE_KEYS.githubToken) || '',
-    aiModels: localStorage.getItem(STORAGE_KEYS.aiModels) || ''
+    aiModels: localStorage.getItem(STORAGE_KEYS.aiModels) || '',
+    agySkill: localStorage.getItem(STORAGE_KEYS.agySkill) || 'jira-ai-task',
+    agyWorkDir: localStorage.getItem(STORAGE_KEYS.agyWorkDir) || '/Users/yangsukim/data/work/house_sara/jira-tasks'
   };
 }
 
@@ -32,8 +38,11 @@ function saveConfig(cfg) {
   localStorage.setItem(STORAGE_KEYS.email, cfg.email || '');
   localStorage.setItem(STORAGE_KEYS.token, cfg.token || '');
   localStorage.setItem(STORAGE_KEYS.downloadDir, cfg.downloadDir || '');
+  localStorage.setItem(STORAGE_KEYS.aiModule, cfg.aiModule || 'copilot');
   localStorage.setItem(STORAGE_KEYS.githubToken, cfg.githubToken || '');
   localStorage.setItem(STORAGE_KEYS.aiModels, cfg.aiModels || '');
+  localStorage.setItem(STORAGE_KEYS.agySkill, cfg.agySkill || 'jira-ai-task');
+  localStorage.setItem(STORAGE_KEYS.agyWorkDir, cfg.agyWorkDir || '');
 }
 
 // 콤마로 구분된 모델 목록 문자열을 공백 제거된 배열로 변환
@@ -65,8 +74,14 @@ const els = {
   cfgToken: document.getElementById('cfg-token'),
   cfgDownloadDir: document.getElementById('cfg-downloadDir'),
   cfgChooseFolder: document.getElementById('cfg-choose-folder'),
+  cfgAiModule: document.getElementById('cfg-aiModule'),
+  copilotSettingsGroup: document.getElementById('copilot-settings-group'),
+  antigravitySettingsGroup: document.getElementById('antigravity-settings-group'),
   cfgGithubToken: document.getElementById('cfg-githubToken'),
   cfgAiModels: document.getElementById('cfg-aiModels'),
+  cfgAgySkill: document.getElementById('cfg-agySkill'),
+  cfgAgyWorkDir: document.getElementById('cfg-agyWorkDir'),
+  cfgChooseAgyFolder: document.getElementById('cfg-choose-agy-folder'),
   cfgSave: document.getElementById('cfg-save'),
   cfgCancel: document.getElementById('cfg-cancel'),
 
@@ -95,6 +110,12 @@ const els = {
   aiRefreshBtn: document.getElementById('ai-refresh-btn')
 };
 
+function toggleAiModuleSettings(module) {
+  const isCopilot = module !== 'antigravity';
+  if (els.copilotSettingsGroup) els.copilotSettingsGroup.classList.toggle('hidden', !isCopilot);
+  if (els.antigravitySettingsGroup) els.antigravitySettingsGroup.classList.toggle('hidden', isCopilot);
+}
+
 // ---- 초기화 ----
 function initSettingsForm() {
   const cfg = loadConfig();
@@ -102,8 +123,12 @@ function initSettingsForm() {
   els.cfgEmail.value = cfg.email;
   els.cfgToken.value = cfg.token;
   els.cfgDownloadDir.value = cfg.downloadDir;
+  if (els.cfgAiModule) els.cfgAiModule.value = cfg.aiModule;
   els.cfgGithubToken.value = cfg.githubToken;
   els.cfgAiModels.value = cfg.aiModels;
+  if (els.cfgAgySkill) els.cfgAgySkill.value = cfg.agySkill;
+  if (els.cfgAgyWorkDir) els.cfgAgyWorkDir.value = cfg.agyWorkDir;
+  toggleAiModuleSettings(cfg.aiModule);
 }
 
 function initSearchForm() {
@@ -124,6 +149,12 @@ els.cfgCancel.addEventListener('click', () => {
   els.settingsPanel.classList.add('hidden');
 });
 
+if (els.cfgAiModule) {
+  els.cfgAiModule.addEventListener('change', () => {
+    toggleAiModuleSettings(els.cfgAiModule.value);
+  });
+}
+
 els.cfgChooseFolder.addEventListener('click', async () => {
   const selected = await window.jiraApi.chooseDownloadFolder();
   if (selected) {
@@ -131,14 +162,26 @@ els.cfgChooseFolder.addEventListener('click', async () => {
   }
 });
 
+if (els.cfgChooseAgyFolder) {
+  els.cfgChooseAgyFolder.addEventListener('click', async () => {
+    const selected = await window.jiraApi.chooseDownloadFolder();
+    if (selected) {
+      els.cfgAgyWorkDir.value = selected;
+    }
+  });
+}
+
 els.cfgSave.addEventListener('click', () => {
   saveConfig({
     jiraUrl: els.cfgJiraUrl.value.trim(),
     email: els.cfgEmail.value.trim(),
     token: els.cfgToken.value,
     downloadDir: els.cfgDownloadDir.value.trim(),
+    aiModule: els.cfgAiModule ? els.cfgAiModule.value : 'copilot',
     githubToken: els.cfgGithubToken.value.trim(),
-    aiModels: els.cfgAiModels.value.trim()
+    aiModels: els.cfgAiModels.value.trim(),
+    agySkill: els.cfgAgySkill ? els.cfgAgySkill.value.trim() : 'jira-ai-task',
+    agyWorkDir: els.cfgAgyWorkDir ? els.cfgAgyWorkDir.value.trim() : ''
   });
   els.settingsPanel.classList.add('hidden');
 });
@@ -425,25 +468,48 @@ els.statusApplyBtn.addEventListener('click', async () => {
 // ---- AI 요약 ----
 async function loadSummary(forceRefresh) {
   if (!state.currentIssueKey) return;
+  const cfg = loadConfig();
+  const isAgy = cfg.aiModule === 'antigravity';
+
   els.aiModal.classList.remove('hidden');
-  els.aiSummaryMeta.textContent = forceRefresh ? '요약을 다시 생성하는 중...' : '요약을 불러오는 중...';
+  els.aiSummaryMeta.textContent = forceRefresh
+    ? (isAgy ? 'Antigravity CLI로 요약을 다시 생성하는 중입니다...' : '요약을 다시 생성하는 중...')
+    : (isAgy ? 'Antigravity 요약을 불러오는 중입니다...' : '요약을 불러오는 중...');
   els.aiSummaryText.textContent = '';
 
   try {
-    const cfg = loadConfig();
     const payload = {
       ...getJiraConfigPayload(),
       issueKey: state.currentIssueKey,
       forceRefresh,
+      aiModule: cfg.aiModule,
       githubToken: cfg.githubToken,
-      aiModels: parseAiModels(cfg.aiModels)
+      aiModels: parseAiModels(cfg.aiModels),
+      agySkill: cfg.agySkill,
+      agyWorkDir: cfg.agyWorkDir
     };
     const result = await window.jiraApi.getSummary(payload);
-    els.aiSummaryText.textContent = result.summary;
-    const generated = new Date(result.generatedAt).toLocaleString('ko-KR');
+    if (window.jiraApi?.renderMarkdown) {
+      const now = new Date();
+      const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+      const agyWorkDir = (cfg.agyWorkDir && cfg.agyWorkDir.trim()) || '/Users/yangsukim/data/work/house_sara/jira-tasks';
+      let filesAbsUrl = `${agyWorkDir}/issues/${todayStr}/files/`.replace(/\\/g, '/');
+      if (!filesAbsUrl.startsWith('/')) filesAbsUrl = `/${filesAbsUrl}`;
+      const filePrefix = encodeURI(`file://${filesAbsUrl}`);
+
+      const resolvedSummary = (result.summary || '')
+        .replace(/\(\.\/files\//g, `(${filePrefix}`)
+        .replace(/\(files\//g, `(${filePrefix}`);
+
+      els.aiSummaryText.innerHTML = await window.jiraApi.renderMarkdown(resolvedSummary);
+    } else {
+      els.aiSummaryText.textContent = result.summary || '';
+    }
+    const generated = result.generatedAt ? new Date(result.generatedAt).toLocaleString('ko-KR') : '';
+    const moduleLabel = result.module === 'antigravity' ? 'Antigravity CLI' : 'Copilot SDK';
     els.aiSummaryMeta.textContent = result.fromCache
-      ? `저장된 요약 (생성일시: ${generated})`
-      : `새로 생성됨 (생성일시: ${generated})`;
+      ? `[${moduleLabel}] 저장된 요약 (${generated ? `생성일시: ${generated}` : '캐시'})`
+      : `[${moduleLabel}] 새로 생성됨 (${generated ? `생성일시: ${generated}` : '완료'})`;
   } catch (err) {
     els.aiSummaryMeta.textContent = '';
     els.aiSummaryText.textContent = `오류: ${err.message}`;
@@ -454,6 +520,28 @@ els.aiSummaryBtn.addEventListener('click', () => loadSummary(false));
 els.aiRefreshBtn.addEventListener('click', () => loadSummary(true));
 els.aiModalClose.addEventListener('click', () => {
   els.aiModal.classList.add('hidden');
+});
+
+// AI 요약 모달 내 링크 및 첨부파일 클릭 이벤트 처리
+els.aiSummaryText.addEventListener('click', (e) => {
+  const link = e.target.closest('a');
+  if (!link) return;
+
+  const rawHref = link.getAttribute('href');
+  if (!rawHref || rawHref === '#') return;
+
+  e.preventDefault();
+
+  if (rawHref.startsWith('file://')) {
+    let filePath = decodeURIComponent(rawHref.replace(/^file:\/\//, ''));
+    // Windows 경로일 경우 맨 앞의 슬래시 제거 처리 (예: /C:/... -> C:/...)
+    if (/^\/[a-zA-Z]:/.test(filePath)) {
+      filePath = filePath.slice(1);
+    }
+    window.jiraApi.openPath(filePath).catch((err) => showToast(`첨부파일을 열 수 없습니다: ${err.message}`));
+  } else if (rawHref.startsWith('http://') || rawHref.startsWith('https://') || rawHref.startsWith('mailto:')) {
+    window.jiraApi.openInBrowser(rawHref).catch((err) => showToast(`링크를 열 수 없습니다: ${err.message}`));
+  }
 });
 
 // ---- 시작 ----

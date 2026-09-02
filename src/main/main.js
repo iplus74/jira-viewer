@@ -175,10 +175,43 @@ ipcMain.handle('shell:openPath', async (_event, filePath) => {
   return shell.openPath(filePath);
 });
 
+let markedParser = null;
+async function getMarkedParser() {
+  if (!markedParser) {
+    const mod = await import('marked');
+    markedParser = mod.marked || mod;
+    if (typeof markedParser.setOptions === 'function') {
+      markedParser.setOptions({
+        gfm: true,
+        breaks: true
+      });
+    }
+  }
+  return markedParser;
+}
+
+// 마크다운 HTML 렌더링
+ipcMain.handle('util:renderMarkdown', async (_event, markdownText) => {
+  try {
+    const parser = await getMarkedParser();
+    return parser.parse(markdownText || '');
+  } catch (err) {
+    console.error('마크다운 렌더링 실패:', err);
+    return markdownText || '';
+  }
+});
+
 // AI 요약 조회/생성
 ipcMain.handle('ai:getSummary', async (_event, payload) => {
   const config = buildJiraConfig(payload);
   const forceRefresh = Boolean(payload.forceRefresh);
-  const issueDetail = await jiraClient.getIssueDetail(payload.issueKey, config);
+  if (payload.aiModule === 'antigravity') {
+    const baseDir = (payload.agyWorkDir && payload.agyWorkDir.trim()) || '/Users/yangsukim/data/work/house_sara/jira-tasks';
+    const todayStr = aiSummary.getTodayString();
+    const filesDir = path.join(baseDir, 'issues', todayStr, 'files');
+    const issueDetail = await jiraClient.getIssueDetail(payload.issueKey, config, filesDir);
+    return aiSummary.getOrCreateAntigravitySummary(issueDetail, forceRefresh, payload.agyWorkDir, payload.agySkill);
+  }
+  const issueDetail = await jiraClient.getIssueDetail(payload.issueKey, config, payload.downloadDir);
   return aiSummary.getOrCreateSummary(issueDetail, forceRefresh, payload.githubToken, payload.aiModels);
 });
