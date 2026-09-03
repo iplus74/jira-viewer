@@ -464,17 +464,32 @@ async function getAccountIdByEmail(email, config) {
 }
 
 /**
- * '이슈' 검색: 담당자 == email, 상태 == statusKey. downloadAllIssues() 로직 참고.
+ * '이슈' 검색: 담당자 == email 및/또는 제목 == keyword, 상태 == statusKey.
  */
-async function searchAssignedIssues(config, { email, statusKey = 'default', maxResults = 20 }) {
+async function searchAssignedIssues(config, { email, keyword, statusKey = 'default', maxResults = 20 }) {
   const headers = buildAuthHeaders(config);
-  const accountId = await resolveAccountId(email, config);
-  if (!accountId) {
-    throw new Error(`이메일(${email})에 해당하는 Jira 사용자를 찾을 수 없습니다.`);
+  const clauses = [];
+  let accountId = null;
+
+  if (email) {
+    accountId = await resolveAccountId(email, config);
+    if (!accountId) {
+      throw new Error(`이메일(${email})에 해당하는 Jira 사용자를 찾을 수 없습니다.`);
+    }
+    clauses.push(`assignee = "${accountId}"`);
+  }
+
+  if (keyword) {
+    const escapedKeyword = keyword.replace(/"/g, '\\"');
+    clauses.push(`summary ~ "${escapedKeyword}"`);
   }
 
   const { clause: statusClause, desc: statusDesc } = buildStatusClause(statusKey);
-  const jql = `assignee = "${accountId}" ${statusClause} ORDER BY created DESC`.trim().replace(/\s+/g, ' ');
+  if (statusClause) {
+    clauses.push(statusClause.replace(/^AND\s+/, ''));
+  }
+
+  const jql = `${clauses.join(' AND ')} ORDER BY created DESC`.trim().replace(/\s+/g, ' ');
 
   const searchUrl = new URL(`${config.jiraUrl}/rest/api/3/search/jql`);
   searchUrl.searchParams.append('jql', jql);
@@ -493,9 +508,9 @@ async function searchAssignedIssues(config, { email, statusKey = 'default', maxR
 
 /**
  * '맨션된 이슈' 검색: 담당자 != email, 백로그/진행 중/테스트 요청 상태, 댓글에서 email이 맨션되었으나
- * 해당 댓글에 대댓글이 없거나 대댓글 작성자가 email이 아닌 이슈. findMentionedIssues()/downloadMentionList() 로직 참고.
+ * 해당 댓글에 대댓글이 없거나 대댓글 작성자가 email이 아닌 이슈.
  */
-async function searchMentionedIssues(config, { email, statusKey = 'default', maxResults = 20 }) {
+async function searchMentionedIssues(config, { email, keyword, statusKey = 'default', maxResults = 20 }) {
   const headers = buildAuthHeaders(config);
   const accountId = await resolveAccountId(email, config);
   if (!accountId) {
@@ -503,6 +518,10 @@ async function searchMentionedIssues(config, { email, statusKey = 'default', max
   }
 
   const clauses = [`assignee != "${accountId}"`];
+  if (keyword) {
+    const escapedKeyword = keyword.replace(/"/g, '\\"');
+    clauses.push(`summary ~ "${escapedKeyword}"`);
+  }
   let statusDesc;
 
   if (statusKey === 'default' || statusKey === '백로그·진행 중·검토 중') {

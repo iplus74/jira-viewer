@@ -89,6 +89,7 @@ const els = {
   searchType: document.getElementById('search-type'),
   searchStatus: document.getElementById('search-status'),
   searchEmail: document.getElementById('search-email'),
+  searchKeyword: document.getElementById('search-keyword'),
   searchMaxNum: document.getElementById('search-maxnum'),
   searchBtn: document.getElementById('search-btn'),
   searchStatusMsg: document.getElementById('search-status-msg'),
@@ -135,8 +136,9 @@ function initSearchForm() {
   const last = loadLastSearch();
   if (last.searchType) els.searchType.value = last.searchType;
   if (last.statusKey) els.searchStatus.value = last.statusKey;
-  if (last.targetEmail) els.searchEmail.value = last.targetEmail;
+  if (last.targetEmail !== undefined) els.searchEmail.value = last.targetEmail;
   else els.searchEmail.value = loadConfig().email;
+  if (last.targetKeyword) els.searchKeyword.value = last.targetKeyword;
   if (last.maxNum) els.searchMaxNum.value = last.maxNum;
 }
 
@@ -201,20 +203,28 @@ els.searchBtn.addEventListener('click', async () => {
   const searchType = els.searchType.value;
   const statusKey = els.searchStatus.value;
   const targetEmail = els.searchEmail.value.trim();
+  const targetKeyword = els.searchKeyword.value.trim();
   const maxNum = parseInt(els.searchMaxNum.value, 10) || 20;
 
-  if (!targetEmail) {
-    els.searchStatusMsg.textContent = '이메일을 입력해 주세요.';
-    return;
+  if (searchType === 'assigned') {
+    if (!targetEmail && !targetKeyword) {
+      els.searchStatusMsg.textContent = '이메일 또는 키워드를 입력해 주세요.';
+      return;
+    }
+  } else if (searchType === 'mention') {
+    if (!targetEmail) {
+      els.searchStatusMsg.textContent = '이메일을 입력해 주세요.';
+      return;
+    }
   }
 
-  saveLastSearch({ searchType, statusKey, targetEmail, maxNum });
+  saveLastSearch({ searchType, statusKey, targetEmail, targetKeyword, maxNum });
 
   els.searchStatusMsg.textContent = '검색 중...';
   els.issueList.innerHTML = '';
 
   try {
-    const payload = { ...getJiraConfigPayload(), searchType, targetEmail, statusKey, maxNum };
+    const payload = { ...getJiraConfigPayload(), searchType, targetEmail, targetKeyword, statusKey, maxNum };
     const result = await window.jiraApi.search(payload);
     state.currentIssues = result.issues || [];
     renderIssueList(state.currentIssues);

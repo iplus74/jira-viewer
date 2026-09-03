@@ -110,17 +110,19 @@ function openInChrome(url) {
 // 이슈 검색: 종류에 따라 담당자 검색 또는 맨션 검색 수행
 ipcMain.handle('jira:search', async (_event, payload) => {
   const config = buildJiraConfig(payload);
-  const { searchType, targetEmail, statusKey, maxNum } = payload;
+  const { searchType, targetEmail, targetKeyword, statusKey, maxNum } = payload;
 
   if (searchType === 'mention') {
     return jiraClient.searchMentionedIssues(config, {
       email: targetEmail,
+      keyword: targetKeyword,
       statusKey,
       maxResults: maxNum
     });
   }
   return jiraClient.searchAssignedIssues(config, {
     email: targetEmail,
+    keyword: targetKeyword,
     statusKey,
     maxResults: maxNum
   });
