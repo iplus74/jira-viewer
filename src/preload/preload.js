@@ -12,6 +12,7 @@ contextBridge.exposeInMainWorld('jiraApi', {
   getSummary: (payload) => ipcRenderer.invoke('ai:getSummary', payload),
   renderMarkdown: (markdownText) => ipcRenderer.invoke('util:renderMarkdown', markdownText),
   chooseDownloadFolder: () => ipcRenderer.invoke('settings:chooseDownloadFolder'),
+  getDefaultAgyWorkDir: () => ipcRenderer.invoke('settings:getDefaultAgyWorkDir'),
   openPath: (filePath) => ipcRenderer.invoke('shell:openPath', filePath)
 });
 

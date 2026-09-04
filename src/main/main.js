@@ -171,6 +171,11 @@ ipcMain.handle('settings:chooseDownloadFolder', async () => {
   return result.filePaths[0];
 });
 
+// Antigravity CLI 기본 작업 폴더 경로 반환
+ipcMain.handle('settings:getDefaultAgyWorkDir', () => {
+  return path.join(app.getPath('home'), 'jira-tasks');
+});
+
 // 다운로드된 첨부파일을 기본 프로그램으로 열기
 ipcMain.handle('shell:openPath', async (_event, filePath) => {
   if (!filePath) return '';
@@ -208,11 +213,12 @@ ipcMain.handle('ai:getSummary', async (_event, payload) => {
   const config = buildJiraConfig(payload);
   const forceRefresh = Boolean(payload.forceRefresh);
   if (payload.aiModule === 'antigravity') {
-    const baseDir = (payload.agyWorkDir && payload.agyWorkDir.trim()) || '/Users/yangsukim/data/work/house_sara/jira-tasks';
+    const defaultDir = path.join(app.getPath('home'), 'jira-tasks');
+    const baseDir = (payload.agyWorkDir && payload.agyWorkDir.trim()) || defaultDir;
     const todayStr = aiSummary.getTodayString();
     const filesDir = path.join(baseDir, 'issues', todayStr, 'files');
     const issueDetail = await jiraClient.getIssueDetail(payload.issueKey, config, filesDir);
-    return aiSummary.getOrCreateAntigravitySummary(issueDetail, forceRefresh, payload.agyWorkDir, payload.agySkill);
+    return aiSummary.getOrCreateAntigravitySummary(issueDetail, forceRefresh, baseDir, payload.agySkill);
   }
   const issueDetail = await jiraClient.getIssueDetail(payload.issueKey, config, payload.downloadDir);
   return aiSummary.getOrCreateSummary(issueDetail, forceRefresh, payload.githubToken, payload.aiModels);

@@ -29,7 +29,7 @@ function loadConfig() {
     githubToken: localStorage.getItem(STORAGE_KEYS.githubToken) || '',
     aiModels: localStorage.getItem(STORAGE_KEYS.aiModels) || '',
     agySkill: localStorage.getItem(STORAGE_KEYS.agySkill) || 'jira-ai-task',
-    agyWorkDir: localStorage.getItem(STORAGE_KEYS.agyWorkDir) || '/Users/yangsukim/data/work/house_sara/jira-tasks'
+    agyWorkDir: localStorage.getItem(STORAGE_KEYS.agyWorkDir) || ''
   };
 }
 
@@ -118,7 +118,7 @@ function toggleAiModuleSettings(module) {
 }
 
 // ---- 초기화 ----
-function initSettingsForm() {
+async function initSettingsForm() {
   const cfg = loadConfig();
   els.cfgJiraUrl.value = cfg.jiraUrl;
   els.cfgEmail.value = cfg.email;
@@ -128,7 +128,15 @@ function initSettingsForm() {
   els.cfgGithubToken.value = cfg.githubToken;
   els.cfgAiModels.value = cfg.aiModels;
   if (els.cfgAgySkill) els.cfgAgySkill.value = cfg.agySkill;
-  if (els.cfgAgyWorkDir) els.cfgAgyWorkDir.value = cfg.agyWorkDir;
+  if (els.cfgAgyWorkDir) {
+    if (cfg.agyWorkDir) {
+      els.cfgAgyWorkDir.value = cfg.agyWorkDir;
+    } else if (window.jiraApi?.getDefaultAgyWorkDir) {
+      els.cfgAgyWorkDir.value = await window.jiraApi.getDefaultAgyWorkDir();
+    } else {
+      els.cfgAgyWorkDir.value = '';
+    }
+  }
   toggleAiModuleSettings(cfg.aiModule);
 }
 
@@ -502,7 +510,8 @@ async function loadSummary(forceRefresh) {
     if (window.jiraApi?.renderMarkdown) {
       const now = new Date();
       const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
-      const agyWorkDir = (cfg.agyWorkDir && cfg.agyWorkDir.trim()) || '/Users/yangsukim/data/work/house_sara/jira-tasks';
+      const defaultAgyDir = window.jiraApi?.getDefaultAgyWorkDir ? await window.jiraApi.getDefaultAgyWorkDir() : '';
+      const agyWorkDir = (cfg.agyWorkDir && cfg.agyWorkDir.trim()) || defaultAgyDir;
       let filesAbsUrl = `${agyWorkDir}/issues/${todayStr}/files/`.replace(/\\/g, '/');
       if (!filesAbsUrl.startsWith('/')) filesAbsUrl = `/${filesAbsUrl}`;
       const filePrefix = encodeURI(`file://${filesAbsUrl}`);

@@ -417,7 +417,14 @@ function autoLinkAttachments(summaryText) {
 }
 
 async function getOrCreateAntigravitySummary(issueDetail, forceRefresh = false, agyWorkDir, agySkill) {
-  const baseDir = (agyWorkDir && agyWorkDir.trim()) || '/Users/yangsukim/data/work/house_sara/jira-tasks';
+  let defaultDir = '';
+  try {
+    defaultDir = path.join(app.getPath('home'), 'jira-tasks');
+  } catch {
+    const home = process.env.HOME || process.env.USERPROFILE || '';
+    defaultDir = path.join(home, 'jira-tasks');
+  }
+  const baseDir = (agyWorkDir && agyWorkDir.trim()) || defaultDir;
   const todayStr = getTodayString();
   const issueKey = issueDetail.key;
 
