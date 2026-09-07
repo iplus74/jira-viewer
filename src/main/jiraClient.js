@@ -553,17 +553,35 @@ async function searchMentionedIssues(config, { email, keyword, statusKey = 'defa
   const issues = data.issues || [];
   const matched = [];
 
+  const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000;
+  const now = Date.now();
+
   for (const issue of issues) {
     const comments = await getIssueComments(issue.key, config);
     if (comments.length === 0) continue;
 
     const threaded = threadComments(comments);
     const isMatch = threaded.some((parent) => {
-      if (!commentMentionsUser(parent.body, accountId)) return false;
-      if (!parent.replies || parent.replies.length === 0) {
-        return true;
-      }
-      return !parent.replies.some((reply) => reply.author?.accountId === accountId);
+      const hasUserReplied = parent.replies && parent.replies.some((reply) => reply.author?.accountId === accountId);
+      if (hasUserReplied) return false;
+
+      const isParentMentionRecent =
+        commentMentionsUser(parent.body, accountId) &&
+        parent.created &&
+        now - new Date(parent.created).getTime() <= SEVEN_DAYS_MS;
+
+      if (isParentMentionRecent) return true;
+
+      const isReplyMentionRecent =
+        parent.replies &&
+        parent.replies.some(
+          (reply) =>
+            commentMentionsUser(reply.body, accountId) &&
+            reply.created &&
+            now - new Date(reply.created).getTime() <= SEVEN_DAYS_MS
+        );
+
+      return isReplyMentionRecent;
     });
 
     if (isMatch) {
