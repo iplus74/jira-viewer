@@ -147,6 +147,19 @@ ipcMain.handle('jira:transitionIssue', async (_event, payload) => {
   return jiraClient.getIssueDetail(payload.issueKey, config, payload.downloadDir);
 });
 
+// 사용자 검색 (맨션 자동완성용)
+ipcMain.handle('jira:searchUsers', async (_event, payload) => {
+  const config = buildJiraConfig(payload);
+  return jiraClient.searchUsers(payload.query, config, payload.issueKey);
+});
+
+// 댓글 및 대댓글 등록
+ipcMain.handle('jira:addComment', async (_event, payload) => {
+  const config = buildJiraConfig(payload);
+  await jiraClient.addComment(payload.issueKey, payload.commentText, payload.parentId, config, payload.mentions);
+  return jiraClient.getIssueDetail(payload.issueKey, config, payload.downloadDir);
+});
+
 // 웹 브라우저로 이슈 열기 (Chrome 우선 실행, mailto는 기본 메일 앱으로 실행)
 ipcMain.handle('jira:openInBrowser', async (_event, webUrl) => {
   if (isSafeMailtoUrl(webUrl)) {

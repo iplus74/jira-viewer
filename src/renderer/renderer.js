@@ -387,6 +387,134 @@ function renderStatusOptions(transitions, currentStatus) {
   });
 }
 
+// ---- 맨션 (Mention) 관리 상태 및 UI ----
+const mentionsState = new Map();
+let mentionDropdownEl = null;
+let currentActiveMentionInput = null;
+let currentMentionQueryStart = -1;
+let mentionDebounceTimer = null;
+
+function getOrCreateMentionDropdown() {
+  if (!mentionDropdownEl) {
+    mentionDropdownEl = document.createElement('div');
+    mentionDropdownEl.id = 'mention-dropdown-popup';
+    mentionDropdownEl.className =
+      'fixed z-[9999] hidden bg-white border border-[#dfe1e6] rounded shadow-lg max-h-48 overflow-y-auto w-64 text-xs';
+    document.body.appendChild(mentionDropdownEl);
+  }
+  return mentionDropdownEl;
+}
+
+function hideMentionDropdown() {
+  if (mentionDropdownEl) {
+    mentionDropdownEl.classList.add('hidden');
+    mentionDropdownEl.innerHTML = '';
+  }
+  currentActiveMentionInput = null;
+  currentMentionQueryStart = -1;
+}
+
+function showMentionDropdown(inputEl, users) {
+  const dropdown = getOrCreateMentionDropdown();
+  const rect = inputEl.getBoundingClientRect();
+
+  dropdown.style.top = `${rect.bottom + window.scrollY + 4}px`;
+  dropdown.style.left = `${rect.left + window.scrollX}px`;
+
+  dropdown.innerHTML = users
+    .map(
+      (u) => `
+    <div class="mention-item flex items-center gap-2 p-2 hover:bg-[#f4f5f7] cursor-pointer transition-colors border-b border-[#f4f5f7] last:border-b-0"
+         data-account-id="${escapeHtml(u.accountId)}"
+         data-display-name="${escapeHtml(u.displayName)}">
+      ${u.avatarUrl ? `<img src="${escapeHtml(u.avatarUrl)}" class="w-5 h-5 rounded-full shrink-0"/>` : ''}
+      <div class="truncate">
+        <div class="font-medium text-[#172b4d]">${escapeHtml(u.displayName)}</div>
+        ${u.emailAddress ? `<div class="text-[11px] text-[#6b778c] truncate">${escapeHtml(u.emailAddress)}</div>` : ''}
+      </div>
+    </div>`
+    )
+    .join('');
+
+  dropdown.classList.remove('hidden');
+}
+
+// 맨션 @ 키워드 입력 감지
+document.addEventListener('input', (e) => {
+  const target = e.target;
+  if (!target || (target.id !== 'new-comment-input' && !target.classList.contains('reply-textarea'))) {
+    hideMentionDropdown();
+    return;
+  }
+
+  const text = target.value;
+  const cursorIndex = target.selectionStart;
+  const textBeforeCursor = text.slice(0, cursorIndex);
+  const match = textBeforeCursor.match(/@([^\s@]*)$/);
+
+  if (!match) {
+    hideMentionDropdown();
+    return;
+  }
+
+  const query = match[1];
+  currentMentionQueryStart = cursorIndex - match[0].length;
+  currentActiveMentionInput = target;
+
+  clearTimeout(mentionDebounceTimer);
+  mentionDebounceTimer = setTimeout(async () => {
+    try {
+      const users = await window.jiraApi.searchUsers({
+        ...getJiraConfigPayload(),
+        query,
+        issueKey: state.currentIssueKey
+      });
+      if (!users || users.length === 0) {
+        hideMentionDropdown();
+        return;
+      }
+      showMentionDropdown(target, users);
+    } catch {
+      hideMentionDropdown();
+    }
+  }, 200);
+});
+
+// 맨션 사용자 드롭다운 클릭 이벤트
+document.addEventListener('click', (e) => {
+  const item = e.target.closest('.mention-item');
+  if (item && currentActiveMentionInput) {
+    const accountId = item.dataset.accountId;
+    const displayName = item.dataset.displayName;
+    const mentionText = `@${displayName}`;
+
+    const input = currentActiveMentionInput;
+    const inputId = input.id;
+    const text = input.value;
+    const cursorIndex = input.selectionStart;
+
+    const before = text.slice(0, currentMentionQueryStart);
+    const after = text.slice(cursorIndex);
+
+    input.value = `${before}${mentionText} ${after}`;
+    const newCursorPos = before.length + mentionText.length + 1;
+    input.setSelectionRange(newCursorPos, newCursorPos);
+    input.focus();
+
+    if (!mentionsState.has(inputId)) {
+      mentionsState.set(inputId, new Map());
+    }
+    mentionsState.get(inputId).set(accountId, { accountId, displayName, text: mentionText });
+
+    hideMentionDropdown();
+    return;
+  }
+
+  if (mentionDropdownEl && !mentionDropdownEl.contains(e.target) && e.target !== currentActiveMentionInput) {
+    hideMentionDropdown();
+  }
+});
+
 function renderIssueDetail(detail) {
   const safeWebUrl = sanitizeHttpUrl(detail.webUrl);
   let commentsHtml = '';
@@ -398,7 +526,7 @@ function renderIssueDetail(detail) {
         const repliesHtml = (c.replies || [])
           .map(
             (r) => `
-          <div class="ml-5 mt-2 mb-5 border-l-[3px] border-[#c1c7d0] pl-3">
+          <div class="ml-5 mt-2 mb-3 border-l-[3px] border-[#c1c7d0] pl-3">
             <div class="text-xs text-[#6b778c] mb-1">#${r.index} ${escapeHtml(r.author)} · ${new Date(r.created).toLocaleString('ko-KR')} [답글]</div>
             <div class="whitespace-pre-wrap leading-normal">${renderTextWithAttachments(r.text)}</div>
           </div>`
@@ -406,20 +534,45 @@ function renderIssueDetail(detail) {
           .join('');
         return `
         <div class="border-l-[3px] border-[#dfe1e6] pl-3 mb-5">
-          <div class="text-xs text-[#6b778c] mb-1">#${c.index} ${escapeHtml(c.author)} · ${new Date(c.created).toLocaleString('ko-KR')}</div>
+          <div class="flex items-center justify-between text-xs text-[#6b778c] mb-1">
+            <span>#${c.index} ${escapeHtml(c.author)} · ${new Date(c.created).toLocaleString('ko-KR')}</span>
+            <button class="btn-toggle-reply text-[#0052cc] hover:underline cursor-pointer bg-transparent border-0 text-xs p-0 font-medium" data-comment-id="${c.id}">답글 달기</button>
+          </div>
           <div class="whitespace-pre-wrap leading-normal">${renderTextWithAttachments(c.text)}</div>
+          
+          <div id="reply-form-${c.id}" class="hidden mt-2 mb-3 p-2.5 bg-[#fafbfc] border border-[#dfe1e6] rounded">
+            <textarea id="reply-input-${c.id}" rows="2" class="reply-textarea w-full p-2 border border-[#dfe1e6] rounded text-xs focus:outline-none focus:border-[#0052cc] resize-y" placeholder="답글을 입력하세요... (@로 사용자 검색)"></textarea>
+            <div class="flex justify-end gap-2 mt-1.5">
+              <button class="btn-cancel-reply px-2.5 py-1 bg-[#ebecf0] hover:bg-[#dfe1e6] text-[#172b4d] text-xs font-medium rounded cursor-pointer border-0" data-comment-id="${c.id}">취소</button>
+              <button class="btn-submit-reply px-2.5 py-1 bg-[#0052cc] hover:bg-[#0065ff] text-white text-xs font-semibold rounded cursor-pointer border-0" data-comment-id="${c.id}">답글 등록</button>
+            </div>
+          </div>
+
           ${repliesHtml}
         </div>`;
       })
       .join('');
   }
 
+  const newCommentFormHtml = `
+    <div class="mt-4 mb-6 p-3 bg-[#f4f5f7] rounded border border-[#dfe1e6]">
+      <div class="text-sm font-bold mb-1.5 text-[#172b4d]">새 댓글 작성</div>
+      <textarea id="new-comment-input" rows="3" class="w-full p-2 border border-[#dfe1e6] rounded text-sm focus:outline-none focus:border-[#0052cc] resize-y" placeholder="댓글을 입력하세요... (@로 사용자 검색)"></textarea>
+      <div class="flex justify-end mt-2">
+        <button id="btn-submit-comment" class="px-3 py-1.5 bg-[#0052cc] hover:bg-[#0065ff] text-white text-xs font-semibold rounded cursor-pointer transition-colors border-0">댓글 작성</button>
+      </div>
+    </div>
+  `;
+
   els.issueDetail.innerHTML = `
     <h2 class="mt-0 shrink-0">[${detail.key}] ${escapeHtml(detail.summary)}</h2>
     <div class="shrink-0 my-2.5 text-[13px] text-[#6b778c]">담당자: ${escapeHtml(detail.assignee)} · 상태: ${escapeHtml(detail.status)} · <a href="#" id="detail-webUrl">${escapeHtml(safeWebUrl || '유효하지 않은 URL')}</a></div>
     <div class="flex-1 min-h-0 overflow-y-auto">
       <div class="whitespace-pre-wrap leading-[1.6] border-t border-b border-[#dfe1e6] py-3 my-3">${renderTextWithAttachments(detail.description)}</div>
-      <h3>댓글 (총 ${detail.comments ? detail.comments.length : 0}개)</h3>
+      <div class="flex items-center justify-between mt-4 mb-2">
+        <h3 class="my-0">댓글 (총 ${detail.comments ? detail.comments.length : 0}개)</h3>
+      </div>
+      ${newCommentFormHtml}
       ${commentsHtml}
     </div>
   `;
@@ -438,8 +591,8 @@ els.backBtn.addEventListener('click', () => {
   showScreen('search');
 });
 
-// 본문/댓글에 삽입된 첨부파일(이미지 외 파일) 클릭 시 기본 프로그램으로 열기
-els.issueDetail.addEventListener('click', (e) => {
+// 본문/댓글/첨부파일 및 댓글 작성/답글 이벤트 처리
+els.issueDetail.addEventListener('click', async (e) => {
   const btn = e.target.closest('[data-role="attachment-file-link"]');
   if (btn && btn.dataset.path) {
     window.jiraApi.openPath(btn.dataset.path);
@@ -449,6 +602,106 @@ els.issueDetail.addEventListener('click', (e) => {
   if (link && link.dataset.url) {
     e.preventDefault();
     window.jiraApi.openInBrowser(link.dataset.url).catch((err) => showToast(`링크를 열 수 없습니다: ${err.message}`));
+    return;
+  }
+
+  // 새 댓글 작성 버튼 클릭
+  const submitCommentBtn = e.target.closest('#btn-submit-comment');
+  if (submitCommentBtn) {
+    const input = document.getElementById('new-comment-input');
+    const text = input ? input.value.trim() : '';
+    if (!text) {
+      showToast('댓글 내용을 입력해 주세요.');
+      return;
+    }
+    submitCommentBtn.disabled = true;
+    submitCommentBtn.textContent = '등록 중...';
+    try {
+      const mentions = mentionsState.has('new-comment-input')
+        ? Array.from(mentionsState.get('new-comment-input').values())
+        : [];
+
+      const payload = {
+        ...getJiraConfigPayload(),
+        issueKey: state.currentIssueKey,
+        commentText: text,
+        mentions
+      };
+      const detail = await window.jiraApi.addComment(payload);
+      mentionsState.delete('new-comment-input');
+      renderIssueDetail(detail);
+      showToast('댓글이 등록되었습니다.');
+    } catch (err) {
+      showToast(`댓글 등록 실패: ${err.message}`);
+      submitCommentBtn.disabled = false;
+      submitCommentBtn.textContent = '댓글 작성';
+    }
+    return;
+  }
+
+  // 답글 달기 토글 버튼 클릭
+  const toggleReplyBtn = e.target.closest('.btn-toggle-reply');
+  if (toggleReplyBtn) {
+    const commentId = toggleReplyBtn.dataset.commentId;
+    const form = document.getElementById(`reply-form-${commentId}`);
+    if (form) {
+      form.classList.toggle('hidden');
+      if (!form.classList.contains('hidden')) {
+        const replyInput = document.getElementById(`reply-input-${commentId}`);
+        if (replyInput) replyInput.focus();
+      }
+    }
+    return;
+  }
+
+  // 답글 취소 버튼 클릭
+  const cancelReplyBtn = e.target.closest('.btn-cancel-reply');
+  if (cancelReplyBtn) {
+    const commentId = cancelReplyBtn.dataset.commentId;
+    const form = document.getElementById(`reply-form-${commentId}`);
+    if (form) {
+      form.classList.add('hidden');
+      const replyInput = document.getElementById(`reply-input-${commentId}`);
+      if (replyInput) replyInput.value = '';
+    }
+    return;
+  }
+
+  // 답글 등록 버튼 클릭
+  const submitReplyBtn = e.target.closest('.btn-submit-reply');
+  if (submitReplyBtn) {
+    const commentId = submitReplyBtn.dataset.commentId;
+    const input = document.getElementById(`reply-input-${commentId}`);
+    const text = input ? input.value.trim() : '';
+    if (!text) {
+      showToast('답글 내용을 입력해 주세요.');
+      return;
+    }
+    submitReplyBtn.disabled = true;
+    submitReplyBtn.textContent = '등록 중...';
+    try {
+      const inputId = `reply-input-${commentId}`;
+      const mentions = mentionsState.has(inputId)
+        ? Array.from(mentionsState.get(inputId).values())
+        : [];
+
+      const payload = {
+        ...getJiraConfigPayload(),
+        issueKey: state.currentIssueKey,
+        commentText: text,
+        parentId: commentId,
+        mentions
+      };
+      const detail = await window.jiraApi.addComment(payload);
+      mentionsState.delete(inputId);
+      renderIssueDetail(detail);
+      showToast('답글이 등록되었습니다.');
+    } catch (err) {
+      showToast(`답글 등록 실패: ${err.message}`);
+      submitReplyBtn.disabled = false;
+      submitReplyBtn.textContent = '답글 등록';
+    }
+    return;
   }
 });
 

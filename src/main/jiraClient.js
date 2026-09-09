@@ -464,6 +464,39 @@ async function getAccountIdByEmail(email, config) {
 }
 
 /**
+ * 키워드로 Jira 사용자를 검색하는 함수 (맨션 자동완성용)
+ */
+async function searchUsers(query, config, issueKey) {
+  if (!query || query.trim().length === 0) return [];
+  const headers = buildAuthHeaders(config);
+  let searchUrl;
+  if (issueKey) {
+    searchUrl = new URL(`${config.jiraUrl}/rest/api/3/user/assignable/search`);
+    searchUrl.searchParams.append('issueKey', issueKey);
+    searchUrl.searchParams.append('query', query.trim());
+  } else {
+    searchUrl = new URL(`${config.jiraUrl}/rest/api/3/user/search`);
+    searchUrl.searchParams.append('query', query.trim());
+  }
+  searchUrl.searchParams.append('maxResults', '10');
+
+  try {
+    const response = await fetch(searchUrl, { method: 'GET', headers });
+    if (!response.ok) return [];
+    const users = await response.json();
+    return (users || []).map((u) => ({
+      accountId: u.accountId,
+      displayName: u.displayName || u.emailAddress || '알 수 없는 사용자',
+      emailAddress: u.emailAddress || '',
+      avatarUrl: u.avatarUrls ? (u.avatarUrls['24x24'] || u.avatarUrls['48x48']) : ''
+    }));
+  } catch (err) {
+    console.error('사용자 검색 실패:', err.message);
+    return [];
+  }
+}
+
+/**
  * '이슈' 검색: 담당자 == email 및/또는 제목 == keyword, 상태 == statusKey.
  */
 async function searchAssignedIssues(config, { email, keyword, statusKey = 'default', maxResults = 20 }) {
@@ -641,6 +674,7 @@ async function getIssueDetail(issueKey, config, downloadDir = null) {
     const replies = [];
     for (const child of parent.replies) {
       replies.push({
+        id: child.id,
         author: child.author?.displayName || '알 수 없음',
         accountId: child.author?.accountId || '',
         created: child.created,
@@ -649,6 +683,7 @@ async function getIssueDetail(issueKey, config, downloadDir = null) {
       });
     }
     commentList.push({
+      id: parent.id,
       author: parent.author?.displayName || '알 수 없음',
       accountId: parent.author?.accountId || '',
       created: parent.created,
@@ -716,6 +751,98 @@ async function transitionIssueStatus(issueKey, targetStatusName, config) {
   return true;
 }
 
+/**
+ * 텍스트를 Jira REST API v3 ADF(Atlassian Document Format) 객체로 변환 (맨션 지원)
+ */
+function textToAdfDoc(text, mentions = []) {
+  const lines = (text || '').split('\n');
+  const validMentions = (mentions || []).filter((m) => m && m.accountId);
+
+  const content = lines.map((line) => {
+    if (!line) {
+      return { type: 'paragraph', content: [] };
+    }
+
+    if (validMentions.length === 0) {
+      return { type: 'paragraph', content: [{ type: 'text', text: line }] };
+    }
+
+    const lineContent = [];
+    let remaining = line;
+
+    while (remaining.length > 0) {
+      let earliestMatch = null;
+      let earliestPos = -1;
+      let matchedMention = null;
+
+      for (const m of validMentions) {
+        const mentionText = m.text || `@${m.displayName}`;
+        const pos = remaining.indexOf(mentionText);
+        if (pos !== -1 && (earliestPos === -1 || pos < earliestPos)) {
+          earliestPos = pos;
+          earliestMatch = mentionText;
+          matchedMention = m;
+        }
+      }
+
+      if (earliestPos !== -1 && earliestMatch && matchedMention) {
+        if (earliestPos > 0) {
+          lineContent.push({ type: 'text', text: remaining.slice(0, earliestPos) });
+        }
+        lineContent.push({
+          type: 'mention',
+          attrs: {
+            id: matchedMention.accountId,
+            text: earliestMatch,
+            userType: 'DEFAULT'
+          }
+        });
+        remaining = remaining.slice(earliestPos + earliestMatch.length);
+      } else {
+        lineContent.push({ type: 'text', text: remaining });
+        break;
+      }
+    }
+
+    return { type: 'paragraph', content: lineContent };
+  });
+
+  return {
+    type: 'doc',
+    version: 1,
+    content: content.length > 0 ? content : [{ type: 'paragraph', content: [] }]
+  };
+}
+
+/**
+ * 특정 이슈에 댓글 또는 대댓글(답글) 등록
+ */
+async function addComment(issueKey, commentText, parentId, config, mentions = []) {
+  const headers = buildAuthHeaders(config);
+  const commentUrl = `${config.jiraUrl}/rest/api/3/issue/${issueKey}/comment`;
+
+  const bodyData = {
+    body: textToAdfDoc(commentText, mentions)
+  };
+
+  if (parentId) {
+    bodyData.parentId = String(parentId);
+  }
+
+  const response = await fetch(commentUrl, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify(bodyData)
+  });
+
+  if (!response.ok) {
+    const errText = await response.text();
+    throw new Error(`Jira 댓글 등록 실패 (${response.status}): ${errText}`);
+  }
+
+  return await response.json();
+}
+
 module.exports = {
   buildAuthHeaders,
   adfToText,
@@ -723,11 +850,13 @@ module.exports = {
   threadComments,
   commentMentionsUser,
   getAccountIdByEmail,
+  searchUsers,
   resolveAccountId,
   searchAssignedIssues,
   searchMentionedIssues,
   getIssueDetail,
   getAvailableTransitions,
   transitionIssueStatus,
-  buildStatusClause
+  buildStatusClause,
+  addComment
 };
