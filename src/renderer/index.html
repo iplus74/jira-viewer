@@ -8,7 +8,17 @@
 <body class="m-0 h-screen overflow-hidden bg-[#f4f5f7] text-[#172b4d]">
   <div id="app" class="h-screen flex flex-col overflow-hidden">
     <header id="app-header" class="shrink-0 flex items-center justify-between px-5 py-3 bg-[#0747a6] text-white">
-      <h1 class="text-lg m-0">Jira Viewer</h1>
+      <div class="flex items-center gap-3">
+        <h1 class="text-lg m-0 font-bold">Jira Viewer</h1>
+        <div class="flex items-center gap-2 ml-4">
+          <button id="quick-memo-create-btn" class="cursor-pointer border-0 rounded px-2.5 py-1 text-xs bg-[rgba(255,255,255,0.2)] text-white hover:bg-[rgba(255,255,255,0.3)] transition-colors">
+            📝 메모 추가 <span class="opacity-75 text-[10px]">(Alt+M)</span>
+          </button>
+          <button id="quick-memo-list-btn" class="cursor-pointer border-0 rounded px-2.5 py-1 text-xs bg-[rgba(255,255,255,0.2)] text-white hover:bg-[rgba(255,255,255,0.3)] transition-colors">
+            📋 메모 조회 <span class="opacity-75 text-[10px]">(Alt+L)</span>
+          </button>
+        </div>
+      </div>
       <button id="settings-toggle" class="cursor-pointer border-0 rounded px-3.5 py-2 text-sm bg-[#dfe1e6] text-[#172b4d]">설정</button>
     </header>
 
@@ -139,10 +149,11 @@
     </section>
   </div>
 
-  <div id="ai-summary-modal" class="fixed inset-0 bg-[rgba(9,30,66,0.54)] flex items-center justify-center hidden">
-    <div class="bg-white rounded-md w-[720px] max-w-[90vw] max-h-[85vh] flex flex-col">
+  <!-- Jira AI 업무 요약 모달 -->
+  <div id="ai-summary-modal" class="fixed inset-0 bg-[rgba(9,30,66,0.54)] flex items-center justify-center hidden z-50">
+    <div class="bg-white rounded-md w-[720px] max-w-[90vw] max-h-[85vh] flex flex-col shadow-xl">
       <div class="flex justify-between items-center px-[18px] py-3.5 border-b border-[#dfe1e6]">
-        <h3>AI 업무 요약</h3>
+        <h3 class="m-0 text-base font-bold text-[#172b4d]">AI 업무 요약</h3>
         <button id="ai-modal-close" class="cursor-pointer border-0 rounded px-3.5 py-2 text-sm bg-[#dfe1e6] text-[#172b4d]">닫기</button>
       </div>
       <div class="px-[18px] py-3.5 overflow-y-auto">
@@ -151,6 +162,210 @@
       </div>
       <div class="px-[18px] py-3 border-t border-[#dfe1e6] flex justify-end">
         <button id="ai-refresh-btn" class="cursor-pointer border-0 rounded px-3.5 py-2 text-sm bg-[#dfe1e6] text-[#172b4d]">다시 생성</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 1. 개발 메모 추가 모달 -->
+  <div id="memo-create-modal" class="fixed inset-0 bg-[rgba(9,30,66,0.54)] flex items-center justify-center hidden z-50">
+    <div class="bg-white rounded-md w-[560px] max-w-[92vw] max-h-[90vh] flex flex-col shadow-2xl overflow-hidden">
+      <div class="flex justify-between items-center px-5 py-3.5 bg-[#0747a6] text-white">
+        <h3 class="m-0 text-base font-bold flex items-center gap-2">
+          <span>📝</span> 개발 메모 추가
+        </h3>
+        <button id="memo-create-close-x" class="cursor-pointer border-0 bg-transparent text-white text-lg leading-none hover:opacity-80">✕</button>
+      </div>
+      <div class="p-5 overflow-y-auto flex flex-col gap-3.5">
+        <div class="flex flex-col gap-1">
+          <label for="memo-create-date" class="text-[13px] font-semibold text-[#42526e]">날짜</label>
+          <input type="date" id="memo-create-date" class="px-3 py-2 border border-[#dfe1e6] rounded text-sm focus:border-[#0052cc] outline-none" />
+        </div>
+        <div class="flex flex-col gap-1">
+          <label for="memo-create-title" class="text-[13px] font-semibold text-[#42526e]">제목 <span class="text-red-500">*</span></label>
+          <input type="text" id="memo-create-title" placeholder="메모 제목을 입력하세요" class="px-3 py-2 border border-[#dfe1e6] rounded text-sm focus:border-[#0052cc] outline-none" />
+        </div>
+        <div class="flex flex-col gap-1">
+          <label for="memo-create-content" class="text-[13px] font-semibold text-[#42526e]">내용</label>
+          <textarea id="memo-create-content" rows="6" placeholder="업무 진행 내역, 구현 내용, 트러블슈팅 등을 입력하세요" class="px-3 py-2 border border-[#dfe1e6] rounded text-sm focus:border-[#0052cc] outline-none resize-y"></textarea>
+        </div>
+        <div class="flex flex-col gap-1.5">
+          <div class="flex justify-between items-center">
+            <label class="text-[13px] font-semibold text-[#42526e]">Links (관련 URL)</label>
+            <button type="button" id="memo-create-add-link-btn" class="cursor-pointer border-0 bg-transparent text-xs text-[#0052cc] hover:underline font-semibold flex items-center gap-0.5">
+              <span>+</span> 링크 추가
+            </button>
+          </div>
+          <div id="memo-create-links-container" class="flex flex-col gap-2 max-h-36 overflow-y-auto">
+            <!-- 동적 링크 인풋 row -->
+          </div>
+        </div>
+        <div id="memo-create-error" class="text-xs text-red-600 hidden"></div>
+      </div>
+      <div class="px-5 py-3.5 border-t border-[#dfe1e6] bg-[#fafbfc] flex justify-end gap-2">
+        <button id="memo-create-save-btn" class="cursor-pointer border-0 rounded px-4 py-2 text-sm bg-[#0052cc] text-white font-medium hover:bg-[#0747a6]">저장</button>
+        <button id="memo-create-cancel-btn" class="cursor-pointer border-0 rounded px-4 py-2 text-sm bg-[#dfe1e6] text-[#172b4d] hover:bg-[#c1c7d0]">취소</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 2. 개발 메모 목록 조회 모달 -->
+  <div id="memo-list-modal" class="fixed inset-0 bg-[rgba(9,30,66,0.54)] flex items-center justify-center hidden z-50">
+    <div class="bg-white rounded-md w-[880px] max-w-[94vw] h-[85vh] max-h-[85vh] flex flex-col shadow-2xl overflow-hidden">
+      <!-- 모달 헤더 -->
+      <div class="shrink-0 flex justify-between items-center px-5 py-3.5 bg-[#0747a6] text-white">
+        <div class="flex items-center gap-3">
+          <h3 class="m-0 text-base font-bold flex items-center gap-2">
+            <span>📋</span> 개발 메모 목록 조회
+          </h3>
+          <span id="memo-total-count" class="text-xs bg-[rgba(255,255,255,0.2)] px-2 py-0.5 rounded text-white">총 0건</span>
+        </div>
+        <button id="memo-list-close-x" class="cursor-pointer border-0 bg-transparent text-white text-lg leading-none hover:opacity-80">✕</button>
+      </div>
+
+      <!-- 2.1 검색 옵션 바 -->
+      <div class="shrink-0 p-4 bg-[#fafbfc] border-b border-[#dfe1e6] flex flex-wrap gap-3 items-end">
+        <div class="flex flex-col gap-1">
+          <label class="text-xs font-semibold text-[#42526e]">기간 (시작일 ~ 종료일)</label>
+          <div class="flex items-center gap-1.5">
+            <input type="date" id="memo-filter-start" class="px-2.5 py-1.5 border border-[#dfe1e6] rounded text-sm bg-white" />
+            <span class="text-gray-500">~</span>
+            <input type="date" id="memo-filter-end" class="px-2.5 py-1.5 border border-[#dfe1e6] rounded text-sm bg-white" />
+          </div>
+        </div>
+        <div class="flex flex-col gap-1 flex-1 min-w-[200px]">
+          <label for="memo-filter-keyword" class="text-xs font-semibold text-[#42526e]">키워드 (제목 + 내용)</label>
+          <input type="text" id="memo-filter-keyword" placeholder="검색어 입력 후 Enter 또는 검색 클릭" class="px-2.5 py-1.5 border border-[#dfe1e6] rounded text-sm bg-white focus:border-[#0052cc] outline-none" />
+        </div>
+        <div class="flex gap-2">
+          <button id="memo-search-btn" class="cursor-pointer border-0 rounded px-3.5 py-1.5 text-sm bg-[#0052cc] text-white hover:bg-[#0747a6]">검색</button>
+          <button id="memo-filter-reset-btn" class="cursor-pointer border-0 rounded px-3 py-1.5 text-sm bg-[#dfe1e6] text-[#172b4d] hover:bg-[#c1c7d0]" title="기본값으로 초기화">초기화</button>
+        </div>
+      </div>
+
+      <!-- 2.2 목록 영역 (페이징 없이 스크롤 처리) -->
+      <div class="flex-1 min-h-0 overflow-y-auto p-4">
+        <table class="w-full border-collapse text-sm">
+          <thead class="sticky top-0 bg-[#f4f5f7] border-b border-[#dfe1e6] z-10">
+            <tr>
+              <th class="py-2.5 px-3 text-left w-10">
+                <input type="checkbox" id="memo-select-all" class="cursor-pointer rounded" title="전체 선택/해제" />
+              </th>
+              <th class="py-2.5 px-3 text-left font-semibold text-[#42526e]">제목</th>
+              <th class="py-2.5 px-3 text-left font-semibold text-[#42526e] w-28">날짜</th>
+              <th class="py-2.5 px-3 text-center font-semibold text-[#42526e] w-24">링크</th>
+              <th class="py-2.5 px-3 text-center font-semibold text-[#42526e] w-16">관리</th>
+            </tr>
+          </thead>
+          <tbody id="memo-table-body" class="divide-y divide-[#dfe1e6]">
+            <!-- JS 동적 렌더링 -->
+          </tbody>
+        </table>
+        <div id="memo-empty-msg" class="py-12 text-center text-[#6b778c] text-sm hidden">
+          조회된 개발 메모가 없습니다.
+        </div>
+      </div>
+
+      <!-- 2.3 하단 액션 바 -->
+      <div class="shrink-0 px-5 py-3 border-t border-[#dfe1e6] bg-[#fafbfc] flex items-center justify-between">
+        <div class="flex items-center gap-3">
+          <span id="memo-selected-count" class="text-xs font-semibold text-[#0052cc] bg-blue-50 px-2.5 py-1 rounded border border-blue-200">
+            0개 선택됨
+          </span>
+          <button id="memo-open-create-from-list-btn" class="cursor-pointer border-0 rounded px-3 py-1.5 text-xs bg-[#dfe1e6] text-[#172b4d] hover:bg-[#c1c7d0]">
+            + 새 메모 작성
+          </button>
+        </div>
+        <div class="flex items-center gap-2">
+          <button id="memo-ai-summary-btn" class="cursor-pointer border-0 rounded px-4 py-2 text-sm bg-[#6554c0] text-white font-semibold hover:bg-[#5243aa] flex items-center gap-1.5 shadow-sm">
+            <span>✨</span> AI 요약
+          </button>
+          <button id="memo-list-close-btn" class="cursor-pointer border-0 rounded px-4 py-2 text-sm bg-[#dfe1e6] text-[#172b4d] hover:bg-[#c1c7d0]">
+            닫기
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 3. 개발 메모 상세 및 수정 모달 -->
+  <div id="memo-detail-modal" class="fixed inset-0 bg-[rgba(9,30,66,0.54)] flex items-center justify-center hidden z-50">
+    <div class="bg-white rounded-md w-[640px] max-w-[92vw] max-h-[90vh] flex flex-col shadow-2xl overflow-hidden">
+      <div class="flex justify-between items-center px-5 py-3.5 bg-[#0747a6] text-white">
+        <h3 id="memo-detail-header-title" class="m-0 text-base font-bold flex items-center gap-2">
+          <span>📄</span> 개발 메모 상세
+        </h3>
+        <button id="memo-detail-close-x" class="cursor-pointer border-0 bg-transparent text-white text-lg leading-none hover:opacity-80">✕</button>
+      </div>
+      <div class="p-5 overflow-y-auto flex flex-col gap-3.5">
+        <input type="hidden" id="memo-detail-id" />
+        <div class="flex justify-between items-center gap-3">
+          <div class="flex flex-col gap-1 flex-1">
+            <label for="memo-detail-date" class="text-[13px] font-semibold text-[#42526e]">날짜</label>
+            <input type="date" id="memo-detail-date" class="px-3 py-2 border border-[#dfe1e6] rounded text-sm focus:border-[#0052cc] outline-none" />
+          </div>
+          <div id="memo-detail-meta" class="text-xs text-[#6b778c] text-right self-end pb-2"></div>
+        </div>
+        <div class="flex flex-col gap-1">
+          <label for="memo-detail-title" class="text-[13px] font-semibold text-[#42526e]">제목 <span class="text-red-500">*</span></label>
+          <input type="text" id="memo-detail-title" placeholder="메모 제목" class="px-3 py-2 border border-[#dfe1e6] rounded text-sm focus:border-[#0052cc] outline-none font-medium text-[#172b4d]" />
+        </div>
+        <div class="flex flex-col gap-1">
+          <label for="memo-detail-content" class="text-[13px] font-semibold text-[#42526e]">내용</label>
+          <textarea id="memo-detail-content" rows="8" placeholder="메모 내용" class="px-3 py-2 border border-[#dfe1e6] rounded text-sm focus:border-[#0052cc] outline-none resize-y"></textarea>
+        </div>
+        <div class="flex flex-col gap-1.5">
+          <div class="flex justify-between items-center">
+            <label class="text-[13px] font-semibold text-[#42526e]">Links (관련 URL)</label>
+            <button type="button" id="memo-detail-add-link-btn" class="cursor-pointer border-0 bg-transparent text-xs text-[#0052cc] hover:underline font-semibold flex items-center gap-0.5">
+              <span>+</span> 링크 추가
+            </button>
+          </div>
+          <div id="memo-detail-links-container" class="flex flex-col gap-2 max-h-36 overflow-y-auto">
+            <!-- 동적 링크 인풋 row -->
+          </div>
+        </div>
+        <div id="memo-detail-error" class="text-xs text-red-600 hidden"></div>
+      </div>
+      <div class="px-5 py-3.5 border-t border-[#dfe1e6] bg-[#fafbfc] flex justify-between items-center">
+        <button id="memo-detail-delete-btn" class="cursor-pointer border-0 rounded px-3.5 py-2 text-sm bg-red-50 text-red-600 hover:bg-red-100 font-medium">
+          🗑️ 삭제
+        </button>
+        <div class="flex gap-2">
+          <button id="memo-detail-save-btn" class="cursor-pointer border-0 rounded px-4 py-2 text-sm bg-[#0052cc] text-white font-medium hover:bg-[#0747a6]">
+            수정 저장
+          </button>
+          <button id="memo-detail-back-btn" class="cursor-pointer border-0 rounded px-3.5 py-2 text-sm bg-[#dfe1e6] text-[#172b4d] hover:bg-[#c1c7d0]">
+            목록으로
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 4. 개발 메모 AI 요약 결과 모달 -->
+  <div id="memo-ai-modal" class="fixed inset-0 bg-[rgba(9,30,66,0.54)] flex items-center justify-center hidden z-50">
+    <div class="bg-white rounded-md w-[780px] max-w-[92vw] max-h-[85vh] flex flex-col shadow-2xl overflow-hidden">
+      <div class="flex justify-between items-center px-5 py-3.5 bg-[#6554c0] text-white">
+        <h3 class="m-0 text-base font-bold flex items-center gap-2">
+          <span>✨</span> 개발 업무 메모 AI 요약
+        </h3>
+        <button id="memo-ai-close-x" class="cursor-pointer border-0 bg-transparent text-white text-lg leading-none hover:opacity-80">✕</button>
+      </div>
+      <div class="p-5 overflow-y-auto flex-1">
+        <div id="memo-ai-meta" class="mb-3 text-xs text-[#6b778c] pb-2 border-b border-[#dfe1e6] flex justify-between items-center"></div>
+        <div id="memo-ai-loading" class="py-12 text-center text-[#6554c0] hidden">
+          <div class="inline-block animate-spin text-2xl mb-2">⏳</div>
+          <div class="text-sm font-medium">선택된 개발 메모를 분석하여 업무별로 요약하는 중입니다...</div>
+        </div>
+        <div id="memo-ai-text" class="markdown-body text-sm leading-relaxed"></div>
+      </div>
+      <div class="px-5 py-3.5 border-t border-[#dfe1e6] bg-[#fafbfc] flex justify-between items-center">
+        <button id="memo-ai-copy-btn" class="cursor-pointer border-0 rounded px-3.5 py-2 text-sm bg-[#dfe1e6] text-[#172b4d] hover:bg-[#c1c7d0]">
+          📋 클립보드 복사
+        </button>
+        <button id="memo-ai-close-btn" class="cursor-pointer border-0 rounded px-4 py-2 text-sm bg-[#6554c0] text-white font-medium hover:bg-[#5243aa]">
+          닫기
+        </button>
       </div>
     </div>
   </div>

@@ -509,6 +509,196 @@ async function getOrCreateSummary(issueDetail, forceRefresh = false, githubToken
   return { ...record, filePath, fromCache: false };
 }
 
+/**
+ * 개발 업무 메모 AI 요약 프롬프트 빌더
+ */
+function buildDevNotesPrompt(notes) {
+  const dates = notes.map((n) => n.date).filter(Boolean).sort();
+  const minDate = dates[0] || '미정';
+  const maxDate = dates[dates.length - 1] || '미정';
+
+  let listText = '';
+  notes.forEach((n, idx) => {
+    listText += `### [메모 #${idx + 1}] ${n.title}\n`;
+    listText += `- **날짜**: ${n.date}\n`;
+    const links = Array.isArray(n.links) && n.links.length > 0 ? n.links : (n.link ? [n.link] : []);
+    if (links.length === 1) {
+      listText += `- **관련 링크**: ${links[0]}\n`;
+    } else if (links.length > 1) {
+      listText += `- **관련 링크** (${links.length}개):\n`;
+      links.forEach((l) => {
+        listText += `  - ${l}\n`;
+      });
+    }
+    listText += `- **내용**:\n${n.content ? n.content.trim() : '(내용 없음)'}\n\n`;
+  });
+
+  return `다음은 개발자가 작성한 개발 업무 메모 목록(선택된 메모 ${notes.length}건, 전체 기간: ${minDate} ~ ${maxDate})입니다.
+메모들을 분석하여 업무(프로젝트/주제)별로 그룹화하고, 각 업무의 진행 기간과 주요 작업 내용을 일목요연하게 요약해 주세요.
+
+---
+
+${listText}
+
+---
+
+## 작성 지침:
+1. 관련 있는 메모들을 업무/작업 단위별로 묶어 정리해 주세요.
+2. 각 업무 그룹마다 **진행 기간**(예: ${minDate} ~ ${maxDate})을 명시해 주세요.
+3. 각 업무별 주요 구현 내용, 문제 해결 내역, 참고 링크가 있는 경우 마크다운 링크([링크](URL))로 포함해 주세요.
+4. 결과물은 깔끔하고 구조화된 Markdown 서식으로 작성해 주세요.`;
+}
+
+/**
+ * 개발 업무 메모 AI 요약 실행
+ */
+async function summarizeDevNotes(notes, config = {}) {
+  if (!Array.isArray(notes) || notes.length === 0) {
+    throw new Error('요약할 개발 메모가 선택되지 않았습니다.');
+  }
+
+  const prompt = buildDevNotesPrompt(notes);
+  const aiModule = config.aiModule || 'copilot';
+
+  if (aiModule === 'antigravity') {
+    let defaultDir = '';
+    try {
+      defaultDir = path.join(app.getPath('home'), 'jira-tasks');
+    } catch {
+      const home = process.env.HOME || process.env.USERPROFILE || '';
+      defaultDir = path.join(home, 'jira-tasks');
+    }
+    const baseDir = (config.agyWorkDir && config.agyWorkDir.trim()) || defaultDir;
+    const todayStr = getTodayString();
+    const notesDir = path.join(baseDir, 'notes', todayStr);
+    await fs.mkdir(notesDir, { recursive: true });
+
+    const promptFilePath = path.join(notesDir, 'notes_summary_prompt.md');
+    await fs.writeFile(promptFilePath, prompt, 'utf-8');
+
+    // Antigravity CLI로 요약 시도
+    try {
+      const agyPath = resolveAgyCliPath();
+      const skillName = (config.agySkill && config.agySkill.trim()) || 'jira-ai-task';
+      const output = await new Promise((resolve, reject) => {
+        execFile(
+          agyPath,
+          ['--print', `다음 메모 프롬프트를 요약해 주세요: ${promptFilePath}`, '--dangerously-skip-permissions'],
+          {
+            cwd: baseDir,
+            env: getAgyEnv(),
+            timeout: 300000,
+            maxBuffer: 10 * 1024 * 1024
+          },
+          (error, stdout, stderr) => {
+            if (error) {
+              return reject(new Error(`Antigravity CLI 실행 오류: ${error.message}${stderr ? `\n${stderr}` : ''}`));
+            }
+            resolve(stdout);
+          }
+        );
+      });
+      return {
+        summary: output || '요약 결과가 생성되지 않았습니다.',
+        module: 'antigravity',
+        generatedAt: Date.now()
+      };
+    } catch (err) {
+      console.warn('Antigravity CLI 요약 실패, Copilot SDK로 대체 시도:', err.message);
+      // Copilot SDK가 가능하면 fallback
+      if (loadCopilotSdk()) {
+        const copilotResult = await generateRawCopilotText(prompt, config.githubToken, config.aiModels);
+        return {
+          summary: copilotResult,
+          module: 'copilot (fallback)',
+          generatedAt: Date.now()
+        };
+      }
+      throw err;
+    }
+  }
+
+  // 기본값: Copilot SDK
+  const summaryText = await generateRawCopilotText(prompt, config.githubToken, config.aiModels);
+  return {
+    summary: summaryText,
+    module: 'copilot',
+    generatedAt: Date.now()
+  };
+}
+
+/**
+ * 프롬프트 문자열로 Copilot SDK 텍스트 생성
+ */
+async function generateRawCopilotText(prompt, githubToken, models) {
+  const sdk = loadCopilotSdk();
+  if (!sdk) {
+    throw new Error('@github/copilot-sdk 를 사용할 수 없습니다. 패키지가 설치되어 있는지 확인해 주세요.');
+  }
+  const { CopilotClient, RuntimeConnection } = sdk;
+  const summaryDir = getSummaryDir();
+  try {
+    await fs.mkdir(summaryDir, { recursive: true });
+  } catch {
+    // ignore
+  }
+
+  const token = sanitizeGithubToken(githubToken || process.env.GITHUB_TOKEN || process.env.GH_TOKEN);
+  const clientOptions = {
+    workingDirectory: summaryDir
+  };
+  if (token) {
+    clientOptions.gitHubToken = token;
+    clientOptions.useLoggedInUser = false;
+  }
+  const nativeCliPath = resolveNativeCliPath();
+  if (nativeCliPath) {
+    clientOptions.connection = RuntimeConnection.forStdio({ path: nativeCliPath });
+  }
+
+  const modelList = Array.isArray(models) && models.length ? models : [undefined];
+  const client = new CopilotClient(clientOptions);
+
+  try {
+    await client.start();
+    let lastError = null;
+    for (const model of modelList) {
+      let session;
+      try {
+        session = await client.createSession(model ? { model } : {});
+        const result = await session.sendAndWait(prompt, 120000);
+        const content = result?.data?.content || '요약을 생성하지 못했습니다.';
+        await session.disconnect();
+        return content;
+      } catch (err) {
+        lastError = err;
+        console.error(`모델 "${model || '기본값'}"로 요약 생성 실패:`, err.message);
+        if (session) {
+          try {
+            await session.disconnect();
+          } catch {
+            // ignore
+          }
+        }
+      }
+    }
+    throw lastError || new Error('요약을 생성하지 못했습니다.');
+  } catch (err) {
+    if (token && /Bad credentials|401/i.test(err.message || '')) {
+      throw new Error(
+        '설정된 GitHub 토큰이 거부되었습니다(Bad credentials). 토큰을 확인하거나 설정에서 비워 두어 로컬 Copilot CLI 로그인을 사용해 보세요.'
+      );
+    }
+    throw err;
+  } finally {
+    try {
+      await client.stop();
+    } catch {
+      // ignore
+    }
+  }
+}
+
 module.exports = {
   getSummaryDir,
   getSummaryFilePath,
@@ -517,5 +707,7 @@ module.exports = {
   getOrCreateSummary,
   getOrCreateAntigravitySummary,
   getTodayString,
-  buildIssueMarkdown
+  buildIssueMarkdown,
+  summarizeDevNotes
 };
+

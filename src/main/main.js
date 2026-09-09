@@ -1,11 +1,12 @@
 'use strict';
 
-const { app, BrowserWindow, ipcMain, shell, dialog } = require('electron');
+const { app, BrowserWindow, ipcMain, shell, dialog, Menu } = require('electron');
 const path = require('path');
 const { execFile } = require('child_process');
 
 const jiraClient = require('./jiraClient');
 const aiSummary = require('./aiSummary');
+const memoDb = require('./memoDb');
 
 let mainWindow = null;
 const appIconPath = path.join(__dirname, '..', '..', 'build', 'icon.png');
@@ -15,6 +16,92 @@ process.on('unhandledRejection', (err) => {
   console.error('처리되지 않은 Promise 오류:', err);
 });
 
+function setupApplicationMenu() {
+  const isMac = process.platform === 'darwin';
+  const template = [
+    ...(isMac ? [{
+      label: app.name,
+      submenu: [
+        { role: 'about', label: `${app.name} 정보` },
+        { type: 'separator' },
+        { role: 'services', label: '서비스' },
+        { type: 'separator' },
+        { role: 'hide', label: `${app.name} 숨기기` },
+        { role: 'hideOthers', label: '기타 숨기기' },
+        { role: 'unhide', label: '모두 표시' },
+        { type: 'separator' },
+        { role: 'quit', label: `${app.name} 종료` }
+      ]
+    }] : []),
+    {
+      label: 'File',
+      submenu: [
+        {
+          label: '개발 메모 추가',
+          accelerator: 'Alt+M',
+          click: () => {
+            if (mainWindow && !mainWindow.isDestroyed()) {
+              mainWindow.webContents.send('menu:open-memo-create');
+            }
+          }
+        },
+        {
+          label: '개발 메모 조회',
+          accelerator: 'Alt+L',
+          click: () => {
+            if (mainWindow && !mainWindow.isDestroyed()) {
+              mainWindow.webContents.send('menu:open-memo-list');
+            }
+          }
+        },
+        { type: 'separator' },
+        isMac ? { role: 'close', label: '창 닫기' } : { role: 'quit', label: '종료' }
+      ]
+    },
+    {
+      label: 'Edit',
+      submenu: [
+        { role: 'undo', label: '실행 취소' },
+        { role: 'redo', label: '다시 실행' },
+        { type: 'separator' },
+        { role: 'cut', label: '잘라내기' },
+        { role: 'copy', label: '복사' },
+        { role: 'paste', label: '붙여넣기' },
+        { role: 'selectAll', label: '모두 선택' }
+      ]
+    },
+    {
+      label: 'View',
+      submenu: [
+        { role: 'reload', label: '새로고침' },
+        { role: 'forceReload', label: '강제 새로고침' },
+        { role: 'toggleDevTools', label: '개발자 도구' },
+        { type: 'separator' },
+        { role: 'resetZoom', label: '실제 크기' },
+        { role: 'zoomIn', label: '확대' },
+        { role: 'zoomOut', label: '축소' },
+        { type: 'separator' },
+        { role: 'togglefullscreen', label: '전체 화면' }
+      ]
+    },
+    {
+      label: 'Window',
+      submenu: [
+        { role: 'minimize', label: '최소화' },
+        { role: 'zoom', label: '확대/축소' },
+        ...(isMac ? [
+          { type: 'separator' },
+          { role: 'front', label: '모두 앞으로 가져오기' }
+        ] : [
+          { role: 'close', label: '닫기' }
+        ])
+      ]
+    }
+  ];
+
+  const menu = Menu.buildFromTemplate(template);
+  Menu.setApplicationMenu(menu);
+}
 
 function createWindow() {
   mainWindow = new BrowserWindow({
@@ -32,7 +119,7 @@ function createWindow() {
   mainWindow.loadFile(path.join(__dirname, '..', 'renderer', 'index.html'));
 }
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
   if (process.platform === 'darwin' && app.dock) {
     // 아이콘 로딩 실패(패키징 누락 등)가 앱 실행 자체를 막지 않도록 방어
     try {
@@ -41,6 +128,15 @@ app.whenReady().then(() => {
       console.error('Dock 아이콘 설정 실패:', err);
     }
   }
+
+  // SQLite DB 초기화
+  try {
+    await memoDb.getDb();
+  } catch (err) {
+    console.error('SQLite 초기화 오류:', err);
+  }
+
+  setupApplicationMenu();
   createWindow();
 
   app.on('activate', () => {
@@ -236,3 +332,43 @@ ipcMain.handle('ai:getSummary', async (_event, payload) => {
   const issueDetail = await jiraClient.getIssueDetail(payload.issueKey, config, payload.downloadDir);
   return aiSummary.getOrCreateSummary(issueDetail, forceRefresh, payload.githubToken, payload.aiModels);
 });
+
+// 개발 메모 등록
+ipcMain.handle('memo:create', async (_event, noteData) => {
+  return memoDb.createNote(noteData);
+});
+
+// 개발 메모 목록 조회
+ipcMain.handle('memo:list', async (_event, searchParams) => {
+  return memoDb.getNotes(searchParams);
+});
+
+// 개발 메모 단건 조회
+ipcMain.handle('memo:get', async (_event, id) => {
+  return memoDb.getNoteById(id);
+});
+
+// 개발 메모 수정
+ipcMain.handle('memo:update', async (_event, { id, data }) => {
+  return memoDb.updateNote(id, data);
+});
+
+// 개발 메모 삭제
+ipcMain.handle('memo:delete', async (_event, id) => {
+  return memoDb.deleteNote(id);
+});
+
+// 선택된 개발 메모 AI 요약
+ipcMain.handle('memo:summarize', async (_event, payload) => {
+  const { ids, notes, aiConfig } = payload || {};
+  let targetNotes = [];
+  if (Array.isArray(ids) && ids.length > 0) {
+    targetNotes = await memoDb.getNotesByIds(ids);
+  } else if (Array.isArray(notes) && notes.length > 0) {
+    targetNotes = notes;
+  } else {
+    throw new Error('요약할 개발 메모가 선택되지 않았습니다.');
+  }
+  return aiSummary.summarizeDevNotes(targetNotes, aiConfig);
+});
+

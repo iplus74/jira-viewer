@@ -22,3 +22,23 @@ contextBridge.exposeInMainWorld('attachmentUtil', {
   splitAttachmentMarkers
 });
 
+contextBridge.exposeInMainWorld('memoApi', {
+  createNote: (payload) => ipcRenderer.invoke('memo:create', payload),
+  listNotes: (searchParams) => ipcRenderer.invoke('memo:list', searchParams),
+  getNote: (id) => ipcRenderer.invoke('memo:get', id),
+  updateNote: (id, data) => ipcRenderer.invoke('memo:update', { id, data }),
+  deleteNote: (id) => ipcRenderer.invoke('memo:delete', id),
+  summarizeNotes: (payload) => ipcRenderer.invoke('memo:summarize', payload),
+  onOpenCreate: (callback) => {
+    const handler = () => callback();
+    ipcRenderer.on('menu:open-memo-create', handler);
+    return () => ipcRenderer.removeListener('menu:open-memo-create', handler);
+  },
+  onOpenList: (callback) => {
+    const handler = () => callback();
+    ipcRenderer.on('menu:open-memo-list', handler);
+    return () => ipcRenderer.removeListener('menu:open-memo-list', handler);
+  }
+});
+
+
