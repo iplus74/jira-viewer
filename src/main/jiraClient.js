@@ -467,16 +467,19 @@ async function getAccountIdByEmail(email, config) {
  * 키워드로 Jira 사용자를 검색하는 함수 (맨션 자동완성용)
  */
 async function searchUsers(query, config, issueKey) {
-  if (!query || query.trim().length === 0) return [];
+  const trimmedQuery = (query || '').trim();
+  if (!trimmedQuery && !issueKey) return [];
   const headers = buildAuthHeaders(config);
   let searchUrl;
   if (issueKey) {
     searchUrl = new URL(`${config.jiraUrl}/rest/api/3/user/assignable/search`);
     searchUrl.searchParams.append('issueKey', issueKey);
-    searchUrl.searchParams.append('query', query.trim());
+    if (trimmedQuery) {
+      searchUrl.searchParams.append('query', trimmedQuery);
+    }
   } else {
     searchUrl = new URL(`${config.jiraUrl}/rest/api/3/user/search`);
-    searchUrl.searchParams.append('query', query.trim());
+    searchUrl.searchParams.append('query', trimmedQuery);
   }
   searchUrl.searchParams.append('maxResults', '10');
 

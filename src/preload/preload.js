@@ -41,4 +41,9 @@ contextBridge.exposeInMainWorld('memoApi', {
   }
 });
 
+contextBridge.exposeInMainWorld('settingsApi', {
+  getAll: () => ipcRenderer.invoke('settings:getAll'),
+  save: (settingsObj) => ipcRenderer.invoke('settings:save', settingsObj)
+});
+
 

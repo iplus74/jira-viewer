@@ -285,6 +285,16 @@ ipcMain.handle('settings:getDefaultAgyWorkDir', () => {
   return path.join(app.getPath('home'), 'jira-tasks');
 });
 
+// SQLite 설정 전체 조회
+ipcMain.handle('settings:getAll', async () => {
+  return memoDb.getAllSettings();
+});
+
+// SQLite 설정 저장
+ipcMain.handle('settings:save', async (_event, settingsObj) => {
+  return memoDb.saveSettings(settingsObj);
+});
+
 // 다운로드된 첨부파일을 기본 프로그램으로 열기
 ipcMain.handle('shell:openPath', async (_event, filePath) => {
   if (!filePath) return '';

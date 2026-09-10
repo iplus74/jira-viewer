@@ -513,14 +513,40 @@ async function getOrCreateSummary(issueDetail, forceRefresh = false, githubToken
  * 개발 업무 메모 AI 요약 프롬프트 빌더
  */
 function buildDevNotesPrompt(notes) {
-  const dates = notes.map((n) => n.date).filter(Boolean).sort();
-  const minDate = dates[0] || '미정';
-  const maxDate = dates[dates.length - 1] || '미정';
+  const allDates = [];
+  notes.forEach((n) => {
+    if (Array.isArray(n.contents) && n.contents.length > 0) {
+      n.contents.forEach((c) => {
+        if (c.writtenAt) allDates.push(c.writtenAt.slice(0, 10));
+      });
+    }
+    if (n.date) allDates.push(n.date);
+    if (n.createdAt) allDates.push(n.createdAt.slice(0, 10));
+  });
+
+  allDates.sort();
+  const minDate = allDates[0] || '미정';
+  const maxDate = allDates[allDates.length - 1] || '미정';
 
   let listText = '';
   notes.forEach((n, idx) => {
     listText += `### [메모 #${idx + 1}] ${n.title}\n`;
-    listText += `- **날짜**: ${n.date}\n`;
+    
+    // 내용 항목들 순회
+    const contents = Array.isArray(n.contents) && n.contents.length > 0
+      ? n.contents
+      : (n.content ? [{ writtenAt: n.date || '', text: n.content }] : []);
+
+    if (contents.length === 0) {
+      listText += `- **작업 내용**: (내용 없음)\n`;
+    } else {
+      listText += `- **작업 내용 (총 ${contents.length}건)**:\n`;
+      contents.forEach((c, cIdx) => {
+        const timeHeader = c.writtenAt ? `[${c.writtenAt}]` : `[항목 #${cIdx + 1}]`;
+        listText += `  - **${timeHeader}**:\n${c.text ? c.text.split('\n').map((line) => `    ${line}`).join('\n') : '    (내용 없음)'}\n`;
+      });
+    }
+
     const links = Array.isArray(n.links) && n.links.length > 0 ? n.links : (n.link ? [n.link] : []);
     if (links.length === 1) {
       listText += `- **관련 링크**: ${links[0]}\n`;
@@ -530,7 +556,7 @@ function buildDevNotesPrompt(notes) {
         listText += `  - ${l}\n`;
       });
     }
-    listText += `- **내용**:\n${n.content ? n.content.trim() : '(내용 없음)'}\n\n`;
+    listText += `\n`;
   });
 
   return `다음은 개발자가 작성한 개발 업무 메모 목록(선택된 메모 ${notes.length}건, 전체 기간: ${minDate} ~ ${maxDate})입니다.
@@ -545,8 +571,9 @@ ${listText}
 ## 작성 지침:
 1. 관련 있는 메모들을 업무/작업 단위별로 묶어 정리해 주세요.
 2. 각 업무 그룹마다 **진행 기간**(예: ${minDate} ~ ${maxDate})을 명시해 주세요.
-3. 각 업무별 주요 구현 내용, 문제 해결 내역, 참고 링크가 있는 경우 마크다운 링크([링크](URL))로 포함해 주세요.
-4. 결과물은 깔끔하고 구조화된 Markdown 서식으로 작성해 주세요.`;
+3. 각 작업 항목별 작성일시를 참고하여 진행 과정 흐름이 드러나도록 정리해 주세요.
+4. 각 업무별 주요 구현 내용, 문제 해결 내역, 참고 링크가 있는 경우 마크다운 링크([링크](URL))로 포함해 주세요.
+5. 결과물은 깔끔하고 구조화된 Markdown 서식으로 작성해 주세요.`;
 }
 
 /**

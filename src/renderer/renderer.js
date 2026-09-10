@@ -15,34 +15,116 @@ const STORAGE_KEYS = {
 
 const state = {
   currentIssues: [],
-  currentIssueKey: null
+  currentIssueKey: null,
+  currentIssueDetail: null
 };
 
-// ---- 설정(로컬 스토리지) ----
-function loadConfig() {
-  return {
-    jiraUrl: localStorage.getItem(STORAGE_KEYS.jiraUrl) || '',
-    email: localStorage.getItem(STORAGE_KEYS.email) || '',
-    token: localStorage.getItem(STORAGE_KEYS.token) || '',
-    downloadDir: localStorage.getItem(STORAGE_KEYS.downloadDir) || '',
-    aiModule: localStorage.getItem(STORAGE_KEYS.aiModule) || 'copilot',
-    githubToken: localStorage.getItem(STORAGE_KEYS.githubToken) || '',
-    aiModels: localStorage.getItem(STORAGE_KEYS.aiModels) || '',
-    agySkill: localStorage.getItem(STORAGE_KEYS.agySkill) || 'jira-ai-task',
-    agyWorkDir: localStorage.getItem(STORAGE_KEYS.agyWorkDir) || ''
-  };
+// 인메모리 설정 캐시
+let appConfig = {
+  jiraUrl: '',
+  email: '',
+  token: '',
+  downloadDir: '',
+  aiModule: 'copilot',
+  githubToken: '',
+  aiModels: '',
+  agySkill: 'jira-ai-task',
+  agyWorkDir: '',
+  lastSearch: '{}'
+};
+
+// 모듈 변경 시 이전 입력값 보존용
+let currentSelectedAiModule = 'copilot';
+
+// ---- 설정(SQLite DB + 인메모리 캐시) ----
+async function loadConfigFromDb() {
+  try {
+    let dbSettings = {};
+    if (window.settingsApi?.getAll) {
+      dbSettings = await window.settingsApi.getAll() || {};
+    }
+
+    const hasDbSettings = Object.keys(dbSettings).length > 0;
+
+    if (hasDbSettings) {
+      appConfig = {
+        jiraUrl: dbSettings.jiraUrl ?? '',
+        email: dbSettings.email ?? '',
+        token: dbSettings.token ?? '',
+        downloadDir: dbSettings.downloadDir ?? '',
+        aiModule: dbSettings.aiModule || 'copilot',
+        githubToken: dbSettings.githubToken ?? '',
+        aiModels: dbSettings.aiModels ?? '',
+        agySkill: dbSettings.agySkill || 'jira-ai-task',
+        agyWorkDir: dbSettings.agyWorkDir ?? '',
+        lastSearch: dbSettings.lastSearch ?? '{}'
+      };
+    } else {
+      // DB에 설정이 없으면 기존 localStorage 값으로 마이그레이션
+      appConfig = {
+        jiraUrl: localStorage.getItem(STORAGE_KEYS.jiraUrl) || '',
+        email: localStorage.getItem(STORAGE_KEYS.email) || '',
+        token: localStorage.getItem(STORAGE_KEYS.token) || '',
+        downloadDir: localStorage.getItem(STORAGE_KEYS.downloadDir) || '',
+        aiModule: localStorage.getItem(STORAGE_KEYS.aiModule) || 'copilot',
+        githubToken: localStorage.getItem(STORAGE_KEYS.githubToken) || '',
+        aiModels: localStorage.getItem(STORAGE_KEYS.aiModels) || '',
+        agySkill: localStorage.getItem(STORAGE_KEYS.agySkill) || 'jira-ai-task',
+        agyWorkDir: localStorage.getItem(STORAGE_KEYS.agyWorkDir) || '',
+        lastSearch: localStorage.getItem(STORAGE_KEYS.lastSearch) || '{}'
+      };
+
+      if (appConfig.jiraUrl || appConfig.email || appConfig.token || appConfig.downloadDir || appConfig.githubToken || appConfig.agyWorkDir) {
+        if (window.settingsApi?.save) {
+          await window.settingsApi.save(appConfig);
+        }
+      }
+    }
+
+    if (!appConfig.agyWorkDir && window.jiraApi?.getDefaultAgyWorkDir) {
+      const defaultDir = await window.jiraApi.getDefaultAgyWorkDir();
+      if (defaultDir) {
+        appConfig.agyWorkDir = defaultDir;
+      }
+    }
+  } catch (err) {
+    console.error('SQLite DB 설정 로드 실패:', err);
+  }
+
+  currentSelectedAiModule = appConfig.aiModule || 'copilot';
+  return appConfig;
 }
 
-function saveConfig(cfg) {
-  localStorage.setItem(STORAGE_KEYS.jiraUrl, cfg.jiraUrl || '');
-  localStorage.setItem(STORAGE_KEYS.email, cfg.email || '');
-  localStorage.setItem(STORAGE_KEYS.token, cfg.token || '');
-  localStorage.setItem(STORAGE_KEYS.downloadDir, cfg.downloadDir || '');
-  localStorage.setItem(STORAGE_KEYS.aiModule, cfg.aiModule || 'copilot');
-  localStorage.setItem(STORAGE_KEYS.githubToken, cfg.githubToken || '');
-  localStorage.setItem(STORAGE_KEYS.aiModels, cfg.aiModels || '');
-  localStorage.setItem(STORAGE_KEYS.agySkill, cfg.agySkill || 'jira-ai-task');
-  localStorage.setItem(STORAGE_KEYS.agyWorkDir, cfg.agyWorkDir || '');
+function loadConfig() {
+  return { ...appConfig };
+}
+
+async function saveConfig(newValues) {
+  appConfig = {
+    ...appConfig,
+    ...newValues
+  };
+
+  // SQLite DB 저장
+  if (window.settingsApi?.save) {
+    try {
+      await window.settingsApi.save(appConfig);
+    } catch (err) {
+      console.error('SQLite DB 설정 저장 실패:', err);
+    }
+  }
+
+  // localStorage 동기화 (호환성 보장)
+  localStorage.setItem(STORAGE_KEYS.jiraUrl, appConfig.jiraUrl || '');
+  localStorage.setItem(STORAGE_KEYS.email, appConfig.email || '');
+  localStorage.setItem(STORAGE_KEYS.token, appConfig.token || '');
+  localStorage.setItem(STORAGE_KEYS.downloadDir, appConfig.downloadDir || '');
+  localStorage.setItem(STORAGE_KEYS.aiModule, appConfig.aiModule || 'copilot');
+  localStorage.setItem(STORAGE_KEYS.githubToken, appConfig.githubToken || '');
+  localStorage.setItem(STORAGE_KEYS.aiModels, appConfig.aiModels || '');
+  localStorage.setItem(STORAGE_KEYS.agySkill, appConfig.agySkill || 'jira-ai-task');
+  localStorage.setItem(STORAGE_KEYS.agyWorkDir, appConfig.agyWorkDir || '');
+  localStorage.setItem(STORAGE_KEYS.lastSearch, appConfig.lastSearch || '{}');
 }
 
 // 콤마로 구분된 모델 목록 문자열을 공백 제거된 배열로 변환
@@ -55,14 +137,20 @@ function parseAiModels(rawValue) {
 
 function loadLastSearch() {
   try {
-    return JSON.parse(localStorage.getItem(STORAGE_KEYS.lastSearch) || '{}');
+    const raw = appConfig.lastSearch || localStorage.getItem(STORAGE_KEYS.lastSearch) || '{}';
+    return JSON.parse(raw);
   } catch {
     return {};
   }
 }
 
 function saveLastSearch(search) {
-  localStorage.setItem(STORAGE_KEYS.lastSearch, JSON.stringify(search));
+  const jsonStr = JSON.stringify(search || {});
+  appConfig.lastSearch = jsonStr;
+  localStorage.setItem(STORAGE_KEYS.lastSearch, jsonStr);
+  if (window.settingsApi?.save) {
+    window.settingsApi.save({ lastSearch: jsonStr }).catch(console.error);
+  }
 }
 
 // ---- DOM refs ----
@@ -116,9 +204,9 @@ const els = {
 
   // 개발 메모 추가 모달
   memoCreateModal: document.getElementById('memo-create-modal'),
-  memoCreateDate: document.getElementById('memo-create-date'),
   memoCreateTitle: document.getElementById('memo-create-title'),
-  memoCreateContent: document.getElementById('memo-create-content'),
+  memoCreateContentsContainer: document.getElementById('memo-create-contents-container'),
+  memoCreateAddContentBtn: document.getElementById('memo-create-add-content-btn'),
   memoCreateLinksContainer: document.getElementById('memo-create-links-container'),
   memoCreateAddLinkBtn: document.getElementById('memo-create-add-link-btn'),
   memoCreateError: document.getElementById('memo-create-error'),
@@ -147,9 +235,9 @@ const els = {
   memoDetailModal: document.getElementById('memo-detail-modal'),
   memoDetailHeaderTitle: document.getElementById('memo-detail-header-title'),
   memoDetailId: document.getElementById('memo-detail-id'),
-  memoDetailDate: document.getElementById('memo-detail-date'),
   memoDetailTitle: document.getElementById('memo-detail-title'),
-  memoDetailContent: document.getElementById('memo-detail-content'),
+  memoDetailContentsContainer: document.getElementById('memo-detail-contents-container'),
+  memoDetailAddContentBtn: document.getElementById('memo-detail-add-content-btn'),
   memoDetailLinksContainer: document.getElementById('memo-detail-links-container'),
   memoDetailAddLinkBtn: document.getElementById('memo-detail-add-link-btn'),
   memoDetailMeta: document.getElementById('memo-detail-meta'),
@@ -175,17 +263,43 @@ function toggleAiModuleSettings(module) {
   if (els.antigravitySettingsGroup) els.antigravitySettingsGroup.classList.toggle('hidden', isCopilot);
 }
 
+function handleAiModuleChange(newModule) {
+  // 1. 현재 화면에 표시되었던 모듈의 입력값을 appConfig에 보존
+  if (currentSelectedAiModule === 'copilot') {
+    appConfig.githubToken = els.cfgGithubToken.value.trim();
+    appConfig.aiModels = els.cfgAiModels.value.trim();
+  } else if (currentSelectedAiModule === 'antigravity') {
+    appConfig.agySkill = (els.cfgAgySkill?.value.trim()) || 'jira-ai-task';
+    appConfig.agyWorkDir = els.cfgAgyWorkDir?.value.trim() || '';
+  }
+
+  // 2. 새로 선택된 모듈의 이전 저장값/기본값을 폼에 복원
+  if (newModule === 'copilot') {
+    els.cfgGithubToken.value = appConfig.githubToken || '';
+    els.cfgAiModels.value = appConfig.aiModels || '';
+  } else if (newModule === 'antigravity') {
+    if (els.cfgAgySkill) els.cfgAgySkill.value = appConfig.agySkill || 'jira-ai-task';
+    if (els.cfgAgyWorkDir) els.cfgAgyWorkDir.value = appConfig.agyWorkDir || '';
+  }
+
+  currentSelectedAiModule = newModule;
+  toggleAiModuleSettings(newModule);
+}
+
 // ---- 초기화 ----
 async function initSettingsForm() {
   const cfg = loadConfig();
-  els.cfgJiraUrl.value = cfg.jiraUrl;
-  els.cfgEmail.value = cfg.email;
-  els.cfgToken.value = cfg.token;
-  els.cfgDownloadDir.value = cfg.downloadDir;
-  if (els.cfgAiModule) els.cfgAiModule.value = cfg.aiModule;
-  els.cfgGithubToken.value = cfg.githubToken;
-  els.cfgAiModels.value = cfg.aiModels;
-  if (els.cfgAgySkill) els.cfgAgySkill.value = cfg.agySkill;
+  els.cfgJiraUrl.value = cfg.jiraUrl || '';
+  els.cfgEmail.value = cfg.email || '';
+  els.cfgToken.value = cfg.token || '';
+  els.cfgDownloadDir.value = cfg.downloadDir || '';
+  if (els.cfgAiModule) {
+    els.cfgAiModule.value = cfg.aiModule || 'copilot';
+    currentSelectedAiModule = cfg.aiModule || 'copilot';
+  }
+  els.cfgGithubToken.value = cfg.githubToken || '';
+  els.cfgAiModels.value = cfg.aiModels || '';
+  if (els.cfgAgySkill) els.cfgAgySkill.value = cfg.agySkill || 'jira-ai-task';
   if (els.cfgAgyWorkDir) {
     if (cfg.agyWorkDir) {
       els.cfgAgyWorkDir.value = cfg.agyWorkDir;
@@ -195,7 +309,7 @@ async function initSettingsForm() {
       els.cfgAgyWorkDir.value = '';
     }
   }
-  toggleAiModuleSettings(cfg.aiModule);
+  toggleAiModuleSettings(cfg.aiModule || 'copilot');
 }
 
 function initSearchForm() {
@@ -208,18 +322,22 @@ function initSearchForm() {
   if (last.maxNum) els.searchMaxNum.value = last.maxNum;
 }
 
-els.settingsToggle.addEventListener('click', () => {
+els.settingsToggle.addEventListener('click', async () => {
+  const willShow = els.settingsPanel.classList.contains('hidden');
+  if (willShow) {
+    await initSettingsForm();
+  }
   els.settingsPanel.classList.toggle('hidden');
 });
 
-els.cfgCancel.addEventListener('click', () => {
-  initSettingsForm();
+els.cfgCancel.addEventListener('click', async () => {
+  await initSettingsForm();
   els.settingsPanel.classList.add('hidden');
 });
 
 if (els.cfgAiModule) {
   els.cfgAiModule.addEventListener('change', () => {
-    toggleAiModuleSettings(els.cfgAiModule.value);
+    handleAiModuleChange(els.cfgAiModule.value);
   });
 }
 
@@ -239,18 +357,36 @@ if (els.cfgChooseAgyFolder) {
   });
 }
 
-els.cfgSave.addEventListener('click', () => {
-  saveConfig({
+els.cfgSave.addEventListener('click', async () => {
+  const selectedModule = els.cfgAiModule ? els.cfgAiModule.value : 'copilot';
+
+  // 현재 화면에 입력된 값과 기존 모듈 설정값들을 함께 보존
+  let githubToken = appConfig.githubToken || '';
+  let aiModels = appConfig.aiModels || '';
+  let agySkill = appConfig.agySkill || 'jira-ai-task';
+  let agyWorkDir = appConfig.agyWorkDir || '';
+
+  if (selectedModule === 'copilot') {
+    githubToken = els.cfgGithubToken.value.trim();
+    aiModels = els.cfgAiModels.value.trim();
+  } else if (selectedModule === 'antigravity') {
+    agySkill = els.cfgAgySkill ? (els.cfgAgySkill.value.trim() || 'jira-ai-task') : 'jira-ai-task';
+    agyWorkDir = els.cfgAgyWorkDir ? els.cfgAgyWorkDir.value.trim() : '';
+  }
+
+  await saveConfig({
     jiraUrl: els.cfgJiraUrl.value.trim(),
     email: els.cfgEmail.value.trim(),
     token: els.cfgToken.value,
     downloadDir: els.cfgDownloadDir.value.trim(),
-    aiModule: els.cfgAiModule ? els.cfgAiModule.value : 'copilot',
-    githubToken: els.cfgGithubToken.value.trim(),
-    aiModels: els.cfgAiModels.value.trim(),
-    agySkill: els.cfgAgySkill ? els.cfgAgySkill.value.trim() : 'jira-ai-task',
-    agyWorkDir: els.cfgAgyWorkDir ? els.cfgAgyWorkDir.value.trim() : ''
+    aiModule: selectedModule,
+    githubToken,
+    aiModels,
+    agySkill,
+    agyWorkDir
   });
+
+  currentSelectedAiModule = selectedModule;
   els.settingsPanel.classList.add('hidden');
 });
 
@@ -330,7 +466,7 @@ function escapeHtml(str) {
 function showToast(message) {
   const toast = document.createElement('div');
   toast.textContent = message;
-  toast.className = 'fixed bottom-6 left-1/2 -translate-x-1/2 bg-[#172b4d] text-white text-sm px-4 py-2 rounded-md shadow-lg z-50';
+  toast.className = 'fixed bottom-6 left-1/2 -translate-x-1/2 bg-[#172b4d] text-white text-sm px-4 py-2 rounded-md shadow-lg z-[10000]';
   document.body.appendChild(toast);
   setTimeout(() => toast.remove(), 2000);
 }
@@ -412,6 +548,7 @@ function renderTextWithAttachments(text) {
 // ---- 이슈 상세 ----
 async function openIssueDetail(issueKey) {
   state.currentIssueKey = issueKey;
+  state.currentIssueDetail = null;
   showScreen('detail');
   els.issueDetail.innerHTML = '<div class="my-2.5 text-[13px] text-[#6b778c]">불러오는 중...</div>';
 
@@ -421,6 +558,7 @@ async function openIssueDetail(issueKey) {
       window.jiraApi.getIssue(payload),
       window.jiraApi.getTransitions(payload)
     ]);
+    state.currentIssueDetail = detail;
     renderIssueDetail(detail);
     renderStatusOptions(transitions, detail.status);
   } catch (err) {
@@ -450,7 +588,9 @@ const mentionsState = new Map();
 let mentionDropdownEl = null;
 let currentActiveMentionInput = null;
 let currentMentionQueryStart = -1;
+let currentMentionQueryEnd = -1;
 let mentionDebounceTimer = null;
+let mentionSearchSeq = 0;
 
 function getOrCreateMentionDropdown() {
   if (!mentionDropdownEl) {
@@ -458,6 +598,12 @@ function getOrCreateMentionDropdown() {
     mentionDropdownEl.id = 'mention-dropdown-popup';
     mentionDropdownEl.className =
       'fixed z-[9999] hidden bg-white border border-[#dfe1e6] rounded shadow-lg max-h-48 overflow-y-auto w-64 text-xs';
+
+    // 드롭다운 클릭 시 textarea blur로 인한 커서 위치 유실 방지
+    mentionDropdownEl.addEventListener('mousedown', (e) => {
+      e.preventDefault();
+    });
+
     document.body.appendChild(mentionDropdownEl);
   }
   return mentionDropdownEl;
@@ -470,6 +616,7 @@ function hideMentionDropdown() {
   }
   currentActiveMentionInput = null;
   currentMentionQueryStart = -1;
+  currentMentionQueryEnd = -1;
 }
 
 function showMentionDropdown(inputEl, users) {
@@ -497,6 +644,52 @@ function showMentionDropdown(inputEl, users) {
   dropdown.classList.remove('hidden');
 }
 
+function applyMentionSelection(item) {
+  if (!item) return;
+  const input = currentActiveMentionInput || document.activeElement;
+  if (!input || (input.id !== 'new-comment-input' && !input.classList?.contains('reply-textarea'))) {
+    return;
+  }
+
+  const accountId = item.dataset.accountId;
+  const displayName = item.dataset.displayName;
+  const mentionText = `@${displayName}`;
+
+  const inputId = input.id;
+  const text = input.value;
+
+  let start = currentMentionQueryStart;
+  let end = currentMentionQueryEnd;
+
+  if (start < 0 || end < 0 || start > text.length || end < start) {
+    const cursorPos = input.selectionStart ?? text.length;
+    const textBefore = text.slice(0, cursorPos);
+    const m = textBefore.match(/@([^\s@]*)$/);
+    if (m) {
+      start = cursorPos - m[0].length;
+      end = cursorPos;
+    } else {
+      start = cursorPos;
+      end = cursorPos;
+    }
+  }
+
+  const before = text.slice(0, start);
+  const after = text.slice(end);
+
+  input.value = `${before}${mentionText} ${after}`;
+  const newCursorPos = before.length + mentionText.length + 1;
+  input.focus();
+  input.setSelectionRange(newCursorPos, newCursorPos);
+
+  if (!mentionsState.has(inputId)) {
+    mentionsState.set(inputId, new Map());
+  }
+  mentionsState.get(inputId).set(accountId, { accountId, displayName, text: mentionText });
+
+  hideMentionDropdown();
+}
+
 // 맨션 @ 키워드 입력 감지
 document.addEventListener('input', (e) => {
   const target = e.target;
@@ -517,8 +710,10 @@ document.addEventListener('input', (e) => {
 
   const query = match[1];
   currentMentionQueryStart = cursorIndex - match[0].length;
+  currentMentionQueryEnd = cursorIndex;
   currentActiveMentionInput = target;
 
+  const seq = ++mentionSearchSeq;
   clearTimeout(mentionDebounceTimer);
   mentionDebounceTimer = setTimeout(async () => {
     try {
@@ -527,44 +722,27 @@ document.addEventListener('input', (e) => {
         query,
         issueKey: state.currentIssueKey
       });
+
+      if (seq !== mentionSearchSeq) return;
+
       if (!users || users.length === 0) {
         hideMentionDropdown();
         return;
       }
       showMentionDropdown(target, users);
     } catch {
-      hideMentionDropdown();
+      if (seq === mentionSearchSeq) {
+        hideMentionDropdown();
+      }
     }
-  }, 200);
+  }, 150);
 });
 
 // 맨션 사용자 드롭다운 클릭 이벤트
 document.addEventListener('click', (e) => {
   const item = e.target.closest('.mention-item');
-  if (item && currentActiveMentionInput) {
-    const accountId = item.dataset.accountId;
-    const displayName = item.dataset.displayName;
-    const mentionText = `@${displayName}`;
-
-    const input = currentActiveMentionInput;
-    const inputId = input.id;
-    const text = input.value;
-    const cursorIndex = input.selectionStart;
-
-    const before = text.slice(0, currentMentionQueryStart);
-    const after = text.slice(cursorIndex);
-
-    input.value = `${before}${mentionText} ${after}`;
-    const newCursorPos = before.length + mentionText.length + 1;
-    input.setSelectionRange(newCursorPos, newCursorPos);
-    input.focus();
-
-    if (!mentionsState.has(inputId)) {
-      mentionsState.set(inputId, new Map());
-    }
-    mentionsState.get(inputId).set(accountId, { accountId, displayName, text: mentionText });
-
-    hideMentionDropdown();
+  if (item) {
+    applyMentionSelection(item);
     return;
   }
 
@@ -646,6 +824,8 @@ function renderIssueDetail(detail) {
 }
 
 els.backBtn.addEventListener('click', () => {
+  state.currentIssueKey = null;
+  state.currentIssueDetail = null;
   showScreen('search');
 });
 
@@ -902,6 +1082,117 @@ function getTwoWeeksAgoDateString() {
   return `${year}-${month}-${day}`;
 }
 
+function getNowDateTimeLocalString(dateObj = new Date()) {
+  const pad = (n) => String(n).padStart(2, '0');
+  const year = dateObj.getFullYear();
+  const month = pad(dateObj.getMonth() + 1);
+  const day = pad(dateObj.getDate());
+  const hours = pad(dateObj.getHours());
+  const minutes = pad(dateObj.getMinutes());
+  return `${year}-${month}-${day}T${hours}:${minutes}`;
+}
+
+function formatDisplayDateTime(str) {
+  if (!str) return '';
+  return str.replace('T', ' ');
+}
+
+// 다중 내용 동적 Row 생성 헬퍼
+function createContentInputRow(initialEntry = {}, isDetail = false) {
+  const row = document.createElement('div');
+  row.className = 'memo-content-entry border border-[#dfe1e6] bg-[#fafbfc] rounded p-2.5 flex flex-col gap-2 relative shadow-xs';
+
+  const entryId = initialEntry.id || `entry_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+  row.dataset.id = entryId;
+
+  // 상단 바: 작성일시 input + 삭제 버튼
+  const topBar = document.createElement('div');
+  topBar.className = 'flex justify-between items-center';
+
+  const dateGroup = document.createElement('div');
+  dateGroup.className = 'flex items-center gap-1.5';
+
+  const dateLabel = document.createElement('label');
+  dateLabel.className = 'text-xs font-semibold text-[#42526e]';
+  dateLabel.textContent = '작성일시:';
+
+  const dateInput = document.createElement('input');
+  dateInput.type = 'datetime-local';
+  dateInput.className = 'memo-entry-datetime px-2 py-1 border border-[#dfe1e6] rounded text-xs bg-white focus:border-[#0052cc] outline-none';
+
+  let initialDateTime = initialEntry.writtenAt || getNowDateTimeLocalString();
+  if (initialDateTime && !initialDateTime.includes('T') && initialDateTime.includes(' ')) {
+    initialDateTime = initialDateTime.replace(' ', 'T');
+  }
+  dateInput.value = initialDateTime ? initialDateTime.slice(0, 16) : getNowDateTimeLocalString();
+
+  dateGroup.appendChild(dateLabel);
+  dateGroup.appendChild(dateInput);
+
+  const delBtn = document.createElement('button');
+  delBtn.type = 'button';
+  delBtn.className = 'memo-entry-del-btn cursor-pointer border-0 bg-transparent text-gray-400 hover:text-red-600 text-xs px-1.5 py-0.5 rounded hover:bg-gray-100 flex items-center gap-0.5';
+  delBtn.textContent = '✕ 삭제';
+  delBtn.title = '이 내용 항목 삭제';
+  delBtn.addEventListener('click', () => {
+    const parentContainer = row.parentElement;
+    row.remove();
+    if (parentContainer && parentContainer.querySelectorAll('.memo-content-entry').length === 0) {
+      parentContainer.appendChild(createContentInputRow({}, isDetail));
+    }
+  });
+
+  topBar.appendChild(dateGroup);
+  topBar.appendChild(delBtn);
+
+  // 하단: 내용 textarea
+  const textarea = document.createElement('textarea');
+  textarea.className = 'memo-entry-text w-full px-2.5 py-1.5 border border-[#dfe1e6] rounded text-sm bg-white focus:border-[#0052cc] outline-none resize-y font-normal';
+  textarea.rows = isDetail ? 4 : 3;
+  textarea.placeholder = '업무 진행 내역, 구현 내용, 트러블슈팅 등을 입력하세요';
+  textarea.value = initialEntry.text || initialEntry.content || '';
+
+  row.appendChild(topBar);
+  row.appendChild(textarea);
+
+  return row;
+}
+
+function populateContentsContainer(container, contents = [], isDetail = false) {
+  if (!container) return;
+  container.innerHTML = '';
+  const sortedContents = Array.isArray(contents) && contents.length > 0
+    ? [...contents].sort((a, b) => (b.writtenAt || '').localeCompare(a.writtenAt || ''))
+    : [{ writtenAt: getNowDateTimeLocalString(), text: '' }];
+
+  sortedContents.forEach((entry) => {
+    container.appendChild(createContentInputRow(entry, isDetail));
+  });
+}
+
+function getContentsFromContainer(container) {
+  if (!container) return [];
+  const entries = container.querySelectorAll('.memo-content-entry');
+  const list = [];
+  entries.forEach((row, idx) => {
+    const dtInput = row.querySelector('.memo-entry-datetime');
+    const txtArea = row.querySelector('.memo-entry-text');
+    const rawDt = dtInput ? dtInput.value.trim() : '';
+    const formattedDt = rawDt ? rawDt.replace('T', ' ') : '';
+    const text = txtArea ? txtArea.value.trim() : '';
+    if (text || formattedDt) {
+      list.push({
+        id: row.dataset.id || `entry_${Date.now()}_${idx}`,
+        writtenAt: formattedDt,
+        text
+      });
+    }
+  });
+
+  // 작성일시 내림차순 정렬
+  return list.sort((a, b) => (b.writtenAt || '').localeCompare(a.writtenAt || ''));
+}
+
 // 다중 링크 동적 Row 생성 헬퍼
 function createLinkInputRow(initialValue = '', isDetail = false) {
   const row = document.createElement('div');
@@ -969,13 +1260,33 @@ function getLinksFromContainer(container) {
   return list;
 }
 
+function getCurrentJiraIssueUrl() {
+  if (els.detailScreen && !els.detailScreen.classList.contains('hidden') && state.currentIssueKey) {
+    if (state.currentIssueDetail?.webUrl) {
+      return state.currentIssueDetail.webUrl;
+    }
+    const cfg = loadConfig();
+    const baseJiraUrl = (cfg.jiraUrl || '').replace(/\/$/, '');
+    if (baseJiraUrl) {
+      return `${baseJiraUrl}/browse/${state.currentIssueKey}`;
+    }
+  }
+  return '';
+}
+
 // 1. 메모 추가 모달
-function openMemoCreateModal() {
+function openMemoCreateModal(initialData = {}) {
   if (!els.memoCreateModal) return;
-  els.memoCreateDate.value = getTodayDateString();
-  els.memoCreateTitle.value = '';
-  els.memoCreateContent.value = '';
-  populateLinksContainer(els.memoCreateLinksContainer, []);
+  els.memoCreateTitle.value = initialData.title || '';
+  populateContentsContainer(els.memoCreateContentsContainer, initialData.contents || []);
+
+  let defaultLinks = initialData.links;
+  if (!defaultLinks || defaultLinks.length === 0) {
+    const currentUrl = getCurrentJiraIssueUrl();
+    defaultLinks = currentUrl ? [currentUrl] : [''];
+  }
+  populateLinksContainer(els.memoCreateLinksContainer, defaultLinks);
+
   if (els.memoCreateError) {
     els.memoCreateError.textContent = '';
     els.memoCreateError.classList.add('hidden');
@@ -991,9 +1302,8 @@ function closeMemoCreateModal() {
 }
 
 async function handleCreateMemo() {
-  const date = els.memoCreateDate.value || getTodayDateString();
   const title = els.memoCreateTitle.value.trim();
-  const content = els.memoCreateContent.value;
+  const contents = getContentsFromContainer(els.memoCreateContentsContainer);
   const links = getLinksFromContainer(els.memoCreateLinksContainer);
 
   if (!title) {
@@ -1009,7 +1319,7 @@ async function handleCreateMemo() {
     els.memoCreateSaveBtn.disabled = true;
     els.memoCreateSaveBtn.textContent = '저장 중...';
 
-    await window.memoApi.createNote({ date, title, content, links });
+    await window.memoApi.createNote({ title, contents, links });
     showToast('개발 메모가 성공적으로 저장되었습니다.');
     closeMemoCreateModal();
 
@@ -1116,19 +1426,33 @@ function renderMemoTable(notes) {
     // 제목 td (클릭 시 상세 화면으로 이동)
     const tdTitle = document.createElement('td');
     tdTitle.className = 'py-2.5 px-3';
+    const titleContainer = document.createElement('div');
+    titleContainer.className = 'flex items-center gap-1.5';
+
     const titleBtn = document.createElement('button');
-    titleBtn.className = 'cursor-pointer border-0 bg-transparent text-left font-medium text-[#0052cc] hover:underline p-0 text-sm max-w-[420px] truncate block';
+    titleBtn.className = 'cursor-pointer border-0 bg-transparent text-left font-medium text-[#0052cc] hover:underline p-0 text-sm max-w-[360px] truncate block';
     titleBtn.textContent = note.title;
     titleBtn.title = note.title;
     titleBtn.addEventListener('click', () => {
       openMemoDetailModal(note.id);
     });
-    tdTitle.appendChild(titleBtn);
+    titleContainer.appendChild(titleBtn);
 
-    // 날짜 td
+    const contentsCount = Array.isArray(note.contents) ? note.contents.length : (note.content ? 1 : 0);
+    if (contentsCount > 1) {
+      const countBadge = document.createElement('span');
+      countBadge.className = 'text-[11px] bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded border border-gray-200 shrink-0';
+      countBadge.textContent = `${contentsCount}개 내용`;
+      titleContainer.appendChild(countBadge);
+    }
+    tdTitle.appendChild(titleContainer);
+
+    // 작성일시 td
     const tdDate = document.createElement('td');
     tdDate.className = 'py-2.5 px-3 text-[#42526e] text-xs whitespace-nowrap';
-    tdDate.textContent = note.date || '';
+    const displayDate = formatDisplayDateTime(note.writtenAt || note.date || note.createdAt || '');
+    tdDate.textContent = displayDate;
+    tdDate.title = `최초 작성: ${note.firstWrittenAt || displayDate}\n최근 작성: ${displayDate}`;
 
     // 링크 td
     const tdLink = document.createElement('td');
@@ -1207,16 +1531,19 @@ async function openMemoDetailModal(noteId) {
     }
 
     els.memoDetailId.value = note.id;
-    els.memoDetailDate.value = note.date || '';
     els.memoDetailTitle.value = note.title || '';
-    els.memoDetailContent.value = note.content || '';
 
+    // 다중 내용 목록 채우기
+    populateContentsContainer(els.memoDetailContentsContainer, note.contents, true);
+
+    // 다중 링크 목록 채우기
     const links = Array.isArray(note.links) && note.links.length > 0 ? note.links : (note.link ? [note.link] : []);
     populateLinksContainer(els.memoDetailLinksContainer, links, true);
 
     if (els.memoDetailMeta) {
       const createdStr = note.createdAt ? new Date(note.createdAt).toLocaleString('ko-KR') : '';
-      els.memoDetailMeta.textContent = `작성일시: ${createdStr}`;
+      const updatedStr = note.updatedAt ? new Date(note.updatedAt).toLocaleString('ko-KR') : '';
+      els.memoDetailMeta.textContent = `최초 등록: ${createdStr} | 최근 수정: ${updatedStr}`;
     }
 
     if (els.memoDetailError) {
@@ -1239,9 +1566,8 @@ function closeMemoDetailModal() {
 
 async function handleUpdateMemo() {
   const id = parseInt(els.memoDetailId.value, 10);
-  const date = els.memoDetailDate.value || getTodayDateString();
   const title = els.memoDetailTitle.value.trim();
-  const content = els.memoDetailContent.value;
+  const contents = getContentsFromContainer(els.memoDetailContentsContainer);
   const links = getLinksFromContainer(els.memoDetailLinksContainer);
 
   if (!title) {
@@ -1257,7 +1583,7 @@ async function handleUpdateMemo() {
     els.memoDetailSaveBtn.disabled = true;
     els.memoDetailSaveBtn.textContent = '저장 중...';
 
-    await window.memoApi.updateNote(id, { date, title, content, links });
+    await window.memoApi.updateNote(id, { title, contents, links });
     showToast('메모가 성공적으로 수정되었습니다.');
     closeMemoDetailModal();
 
@@ -1272,7 +1598,7 @@ async function handleUpdateMemo() {
     }
   } finally {
     els.memoDetailSaveBtn.disabled = false;
-    els.memoDetailSaveBtn.textContent = '수정 저장';
+    els.memoDetailSaveBtn.textContent = '저장';
   }
 }
 
@@ -1310,9 +1636,9 @@ async function handleAiSummaryForNotes() {
   if (els.memoAiText) els.memoAiText.innerHTML = '';
 
   const cfg = loadConfig();
-  const dates = selectedNotes.map((n) => n.date).filter(Boolean).sort();
-  const minDate = dates[0] || '';
-  const maxDate = dates[dates.length - 1] || '';
+  const dates = selectedNotes.map((n) => n.writtenAt || n.date).filter(Boolean).sort();
+  const minDate = dates[0] ? dates[0].slice(0, 10) : '';
+  const maxDate = dates[dates.length - 1] ? dates[dates.length - 1].slice(0, 10) : '';
   const dateRangeStr = minDate === maxDate ? minDate : `${minDate} ~ ${maxDate}`;
 
   if (els.memoAiMeta) {
@@ -1367,6 +1693,15 @@ if (els.quickMemoCreateBtn) els.quickMemoCreateBtn.addEventListener('click', ope
 if (els.quickMemoListBtn) els.quickMemoListBtn.addEventListener('click', openMemoListModal);
 
 // 메모 추가 모달
+if (els.memoCreateAddContentBtn && els.memoCreateContentsContainer) {
+  els.memoCreateAddContentBtn.addEventListener('click', () => {
+    const newRow = createContentInputRow({}, false);
+    els.memoCreateContentsContainer.prepend(newRow);
+    els.memoCreateContentsContainer.scrollTop = 0;
+    const txtArea = newRow.querySelector('.memo-entry-text');
+    if (txtArea) txtArea.focus();
+  });
+}
 if (els.memoCreateAddLinkBtn && els.memoCreateLinksContainer) {
   els.memoCreateAddLinkBtn.addEventListener('click', () => {
     els.memoCreateLinksContainer.appendChild(createLinkInputRow('', false));
@@ -1417,6 +1752,15 @@ if (els.memoListCloseBtn) els.memoListCloseBtn.addEventListener('click', closeMe
 if (els.memoListCloseX) els.memoListCloseX.addEventListener('click', closeMemoListModal);
 
 // 메모 상세 모달
+if (els.memoDetailAddContentBtn && els.memoDetailContentsContainer) {
+  els.memoDetailAddContentBtn.addEventListener('click', () => {
+    const newRow = createContentInputRow({}, true);
+    els.memoDetailContentsContainer.prepend(newRow);
+    els.memoDetailContentsContainer.scrollTop = 0;
+    const txtArea = newRow.querySelector('.memo-entry-text');
+    if (txtArea) txtArea.focus();
+  });
+}
 if (els.memoDetailAddLinkBtn && els.memoDetailLinksContainer) {
   els.memoDetailAddLinkBtn.addEventListener('click', () => {
     els.memoDetailLinksContainer.appendChild(createLinkInputRow('', true));
@@ -1490,8 +1834,11 @@ window.addEventListener('keydown', (e) => {
 });
 
 // ---- 시작 ----
-initSettingsForm();
-initSearchForm();
-showScreen('search');
+(async function initApp() {
+  await loadConfigFromDb();
+  await initSettingsForm();
+  initSearchForm();
+  showScreen('search');
+})();
 
 
