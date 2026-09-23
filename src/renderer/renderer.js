@@ -205,6 +205,8 @@ const els = {
   // 개발 메모 추가 모달
   memoCreateModal: document.getElementById('memo-create-modal'),
   memoCreateTitle: document.getElementById('memo-create-title'),
+  memoCreateType: document.getElementById('memo-create-type'),
+  memoCreateStatus: document.getElementById('memo-create-status'),
   memoCreateContentsContainer: document.getElementById('memo-create-contents-container'),
   memoCreateAddContentBtn: document.getElementById('memo-create-add-content-btn'),
   memoCreateLinksContainer: document.getElementById('memo-create-links-container'),
@@ -219,6 +221,7 @@ const els = {
   memoTotalCount: document.getElementById('memo-total-count'),
   memoFilterStart: document.getElementById('memo-filter-start'),
   memoFilterEnd: document.getElementById('memo-filter-end'),
+  memoFilterType: document.getElementById('memo-filter-type'),
   memoFilterKeyword: document.getElementById('memo-filter-keyword'),
   memoSearchBtn: document.getElementById('memo-search-btn'),
   memoFilterResetBtn: document.getElementById('memo-filter-reset-btn'),
@@ -236,6 +239,8 @@ const els = {
   memoDetailHeaderTitle: document.getElementById('memo-detail-header-title'),
   memoDetailId: document.getElementById('memo-detail-id'),
   memoDetailTitle: document.getElementById('memo-detail-title'),
+  memoDetailType: document.getElementById('memo-detail-type'),
+  memoDetailStatus: document.getElementById('memo-detail-status'),
   memoDetailContentsContainer: document.getElementById('memo-detail-contents-container'),
   memoDetailAddContentBtn: document.getElementById('memo-detail-add-content-btn'),
   memoDetailLinksContainer: document.getElementById('memo-detail-links-container'),
@@ -1278,6 +1283,8 @@ function getCurrentJiraIssueUrl() {
 function openMemoCreateModal(initialData = {}) {
   if (!els.memoCreateModal) return;
   els.memoCreateTitle.value = initialData.title || '';
+  if (els.memoCreateType) els.memoCreateType.value = initialData.type || '개발';
+  if (els.memoCreateStatus) els.memoCreateStatus.value = initialData.status || '';
   populateContentsContainer(els.memoCreateContentsContainer, initialData.contents || []);
 
   let defaultLinks = initialData.links;
@@ -1303,6 +1310,8 @@ function closeMemoCreateModal() {
 
 async function handleCreateMemo() {
   const title = els.memoCreateTitle.value.trim();
+  const type = els.memoCreateType ? els.memoCreateType.value : '개발';
+  const status = els.memoCreateStatus ? els.memoCreateStatus.value : '';
   const contents = getContentsFromContainer(els.memoCreateContentsContainer);
   const links = getLinksFromContainer(els.memoCreateLinksContainer);
 
@@ -1319,7 +1328,7 @@ async function handleCreateMemo() {
     els.memoCreateSaveBtn.disabled = true;
     els.memoCreateSaveBtn.textContent = '저장 중...';
 
-    await window.memoApi.createNote({ title, contents, links });
+    await window.memoApi.createNote({ title, type, status, contents, links });
     showToast('개발 메모가 성공적으로 저장되었습니다.');
     closeMemoCreateModal();
 
@@ -1362,14 +1371,15 @@ async function loadMemoList() {
   if (!window.memoApi) return;
   const startDate = els.memoFilterStart.value;
   const endDate = els.memoFilterEnd.value;
+  const type = els.memoFilterType ? els.memoFilterType.value : '';
   const keyword = (els.memoFilterKeyword.value || '').trim();
 
   try {
     if (els.memoTableBody) {
-      els.memoTableBody.innerHTML = '<tr><td colspan="5" class="py-8 text-center text-[#6b778c]">메모 목록을 불러오는 중...</td></tr>';
+      els.memoTableBody.innerHTML = '<tr><td colspan="7" class="py-8 text-center text-[#6b778c]">메모 목록을 불러오는 중...</td></tr>';
     }
 
-    const notes = await window.memoApi.listNotes({ startDate, endDate, keyword });
+    const notes = await window.memoApi.listNotes({ startDate, endDate, type, keyword });
     memoState.notes = notes || [];
     memoState.selectedIds.clear();
 
@@ -1378,7 +1388,7 @@ async function loadMemoList() {
   } catch (err) {
     console.error('메모 목록 조회 실패:', err);
     if (els.memoTableBody) {
-      els.memoTableBody.innerHTML = `<tr><td colspan="5" class="py-8 text-center text-red-500">조회 실패: ${err.message}</td></tr>`;
+      els.memoTableBody.innerHTML = `<tr><td colspan="7" class="py-8 text-center text-red-500">조회 실패: ${err.message}</td></tr>`;
     }
   }
 }
@@ -1447,6 +1457,38 @@ function renderMemoTable(notes) {
     }
     tdTitle.appendChild(titleContainer);
 
+    // 종류 td
+    const tdType = document.createElement('td');
+    tdType.className = 'py-2.5 px-3 text-center';
+    if (note.type) {
+      const typeBadge = document.createElement('span');
+      const isDev = note.type === '개발';
+      typeBadge.className = `text-[11px] px-1.5 py-0.5 rounded border whitespace-nowrap ${isDev ? 'bg-blue-50 text-[#0052cc] border-blue-200' : 'bg-gray-100 text-gray-600 border-gray-200'}`;
+      typeBadge.textContent = note.type;
+      tdType.appendChild(typeBadge);
+    } else {
+      tdType.textContent = '-';
+      tdType.className += ' text-gray-400 text-xs';
+    }
+
+    // 상태 td
+    const tdStatus = document.createElement('td');
+    tdStatus.className = 'py-2.5 px-3 text-center';
+    if (note.status) {
+      const statusColorMap = {
+        진행중: 'bg-yellow-50 text-yellow-700 border-yellow-200',
+        테스트: 'bg-purple-50 text-purple-700 border-purple-200',
+        반영: 'bg-green-50 text-green-700 border-green-200'
+      };
+      const statusBadge = document.createElement('span');
+      statusBadge.className = `text-[11px] px-1.5 py-0.5 rounded border whitespace-nowrap ${statusColorMap[note.status] || 'bg-gray-100 text-gray-600 border-gray-200'}`;
+      statusBadge.textContent = note.status;
+      tdStatus.appendChild(statusBadge);
+    } else {
+      tdStatus.textContent = '-';
+      tdStatus.className += ' text-gray-400 text-xs';
+    }
+
     // 작성일시 td
     const tdDate = document.createElement('td');
     tdDate.className = 'py-2.5 px-3 text-[#42526e] text-xs whitespace-nowrap';
@@ -1500,6 +1542,8 @@ function renderMemoTable(notes) {
 
     tr.appendChild(tdCheck);
     tr.appendChild(tdTitle);
+    tr.appendChild(tdType);
+    tr.appendChild(tdStatus);
     tr.appendChild(tdDate);
     tr.appendChild(tdLink);
     tr.appendChild(tdAction);
@@ -1532,6 +1576,8 @@ async function openMemoDetailModal(noteId) {
 
     els.memoDetailId.value = note.id;
     els.memoDetailTitle.value = note.title || '';
+    if (els.memoDetailType) els.memoDetailType.value = note.type || '개발';
+    if (els.memoDetailStatus) els.memoDetailStatus.value = note.status || '';
 
     // 다중 내용 목록 채우기
     populateContentsContainer(els.memoDetailContentsContainer, note.contents, true);
@@ -1567,6 +1613,8 @@ function closeMemoDetailModal() {
 async function handleUpdateMemo() {
   const id = parseInt(els.memoDetailId.value, 10);
   const title = els.memoDetailTitle.value.trim();
+  const type = els.memoDetailType ? els.memoDetailType.value : '개발';
+  const status = els.memoDetailStatus ? els.memoDetailStatus.value : '';
   const contents = getContentsFromContainer(els.memoDetailContentsContainer);
   const links = getLinksFromContainer(els.memoDetailLinksContainer);
 
@@ -1583,7 +1631,7 @@ async function handleUpdateMemo() {
     els.memoDetailSaveBtn.disabled = true;
     els.memoDetailSaveBtn.textContent = '저장 중...';
 
-    await window.memoApi.updateNote(id, { title, contents, links });
+    await window.memoApi.updateNote(id, { title, type, status, contents, links });
     showToast('메모가 성공적으로 수정되었습니다.');
     closeMemoDetailModal();
 
@@ -1722,6 +1770,7 @@ if (els.memoFilterResetBtn) {
   els.memoFilterResetBtn.addEventListener('click', () => {
     els.memoFilterStart.value = getTwoWeeksAgoDateString();
     els.memoFilterEnd.value = getTodayDateString();
+    if (els.memoFilterType) els.memoFilterType.value = '';
     els.memoFilterKeyword.value = '';
     loadMemoList();
   });

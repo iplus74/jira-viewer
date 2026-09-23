@@ -63,6 +63,8 @@ async function getDb() {
       title TEXT NOT NULL,
       content TEXT,
       link TEXT,
+      type TEXT DEFAULT '',
+      status TEXT DEFAULT '',
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
     );
@@ -74,6 +76,16 @@ async function getDb() {
       updated_at TEXT NOT NULL
     );
   `);
+
+  // 기존 DB 파일 호환: type/status 컬럼이 없으면 추가
+  const tableInfo = dbInstance.exec("PRAGMA table_info(dev_notes)");
+  const existingColumns = tableInfo[0] ? tableInfo[0].values.map((v) => v[1]) : [];
+  if (!existingColumns.includes('type')) {
+    dbInstance.run("ALTER TABLE dev_notes ADD COLUMN type TEXT DEFAULT ''");
+  }
+  if (!existingColumns.includes('status')) {
+    dbInstance.run("ALTER TABLE dev_notes ADD COLUMN status TEXT DEFAULT ''");
+  }
 
   persistDb();
   return dbInstance;
@@ -253,6 +265,8 @@ function mapRowToNote(row) {
     writtenAt: latestWrittenAt,
     firstWrittenAt,
     title: row.title,
+    type: row.type || '',
+    status: row.status || '',
     contents,            // 다중 내용 항목 [{ id, writtenAt, text }] (작성일시 내림차순)
     content: combinedContentText, // 하위 호환용 텍스트
     link: links[0] || '', // 이전 단일 링크 호환용
@@ -269,6 +283,8 @@ async function createNote(note) {
   const db = await getDb();
   const now = new Date().toISOString();
   const title = (note.title || '').trim();
+  const type = (note.type || '').trim();
+  const status = (note.status || '').trim();
   const contentsInput = note.contents || (note.content ? [{ writtenAt: note.writtenAt || getNowFormattedString(), text: note.content }] : []);
   const serializedContent = normalizeContents(contentsInput, note.date);
   const link = normalizeLinks(note.links || note.link);
@@ -283,10 +299,10 @@ async function createNote(note) {
   const dateValue = note.date || firstEntryDate;
 
   const stmt = db.prepare(`
-    INSERT INTO dev_notes (date, title, content, link, created_at, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?)
+    INSERT INTO dev_notes (date, title, content, link, type, status, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
   `);
-  stmt.run([dateValue, title, serializedContent, link, now, now]);
+  stmt.run([dateValue, title, serializedContent, link, type, status, now, now]);
   stmt.free();
 
   const res = db.exec('SELECT last_insert_rowid() AS id');
@@ -302,7 +318,7 @@ async function createNote(note) {
 async function getNoteById(id) {
   const db = await getDb();
   const stmt = db.prepare(`
-    SELECT id, date, title, content, link, created_at, updated_at
+    SELECT id, date, title, content, link, type, status, created_at, updated_at
     FROM dev_notes
     WHERE id = ?
   `);
@@ -320,12 +336,12 @@ async function getNoteById(id) {
 /**
  * 개발 메모 목록 조회 (기간 및 키워드 필터링)
  */
-async function getNotes({ startDate, endDate, keyword } = {}) {
+async function getNotes({ startDate, endDate, keyword, type } = {}) {
   const db = await getDb();
 
   // 모든 메모 조회 후 상세 필터링 및 최신순 정렬
   const sql = `
-    SELECT id, date, title, content, link, created_at, updated_at
+    SELECT id, date, title, content, link, type, status, created_at, updated_at
     FROM dev_notes
     ORDER BY id DESC
   `;
@@ -361,7 +377,12 @@ async function getNotes({ startDate, endDate, keyword } = {}) {
       if (!isMatchPeriod) return false;
     }
 
-    // 2. 키워드 필터링: 제목 또는 내용 전체 텍스트 검색
+    // 2. 종류 필터링
+    if (type && type.trim()) {
+      if ((note.type || '') !== type.trim()) return false;
+    }
+
+    // 3. 키워드 필터링: 제목 또는 내용 전체 텍스트 검색
     if (keyword && keyword.trim()) {
       const kw = keyword.trim().toLowerCase();
       const titleMatch = (note.title || '').toLowerCase().includes(kw);
@@ -396,7 +417,7 @@ async function getNotesByIds(ids = []) {
   const db = await getDb();
   const placeholders = ids.map(() => '?').join(',');
   const sql = `
-    SELECT id, date, title, content, link, created_at, updated_at
+    SELECT id, date, title, content, link, type, status, created_at, updated_at
     FROM dev_notes
     WHERE id IN (${placeholders})
     ORDER BY id ASC
@@ -429,6 +450,8 @@ async function updateNote(id, note) {
   const db = await getDb();
   const now = new Date().toISOString();
   const title = (note.title || '').trim();
+  const type = (note.type || '').trim();
+  const status = (note.status || '').trim();
   const contentsInput = note.contents || (note.content ? [{ writtenAt: note.writtenAt || getNowFormattedString(), text: note.content }] : []);
   const serializedContent = normalizeContents(contentsInput, note.date);
   const link = normalizeLinks(note.links || note.link);
@@ -443,10 +466,10 @@ async function updateNote(id, note) {
 
   const stmt = db.prepare(`
     UPDATE dev_notes
-    SET date = ?, title = ?, content = ?, link = ?, updated_at = ?
+    SET date = ?, title = ?, content = ?, link = ?, type = ?, status = ?, updated_at = ?
     WHERE id = ?
   `);
-  stmt.run([dateValue, title, serializedContent, link, now, id]);
+  stmt.run([dateValue, title, serializedContent, link, type, status, now, id]);
   stmt.free();
 
   persistDb();
