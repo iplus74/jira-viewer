@@ -506,10 +506,11 @@ function toFileUrl(filePath) {
   return encodeURI(`file://${normalized}`);
 }
 
-// 마크다운 형태의 링크([label](url))를 클릭 가능한 <a> 태그로 변환 (http/https/mailto만 허용, 나머지 텍스트는 escapeHtml 처리)
-// label 안에 대괄호가 포함된 경우([KAN-811] 처럼)도 매칭되도록 지연(lazy) 매칭 사용
+// 마크다운 형태의 링크([label](url))와 일반 텍스트에 포함된 http/https URL을 클릭 가능한 <a> 태그로 변환
+// (http/https/mailto만 허용, 나머지 텍스트는 escapeHtml 처리)
+// label에는 짝이 맞는 대괄호 한 겹([KAN-811] 처럼)까지만 허용해, 무관한 [텍스트]가 뒤쪽 링크의 label에 잘못 흡수되는 것을 방지
 function linkifyText(text) {
-  const LINK_REGEX = /\[([\s\S]*?)\]\((https?:\/\/[^\s)]+|mailto:[^\s)]+)\)/g;
+  const LINK_REGEX = /\[((?:[^[\]]|\[[^[\]]*\])*)\]\((https?:\/\/[^\s)]+|mailto:[^\s)]+)\)|(https?:\/\/[^\s<>"')\]]+)/g;
   const input = text || '';
   let result = '';
   let lastIndex = 0;
@@ -518,11 +519,29 @@ function linkifyText(text) {
     if (match.index > lastIndex) {
       result += escapeHtml(input.slice(lastIndex, match.index));
     }
-    const safeUrl = sanitizeExternalLinkUrl(match[2]);
-    if (safeUrl) {
-      result += `<a href="#" data-role="ext-link" data-url="${escapeHtml(safeUrl)}" class="text-[#0052cc] underline">${escapeHtml(match[1] || match[2])}</a>`;
-    } else {
-      result += escapeHtml(match[0]);
+    if (match[2] !== undefined) {
+      // 마크다운 스타일 링크: [label](url)
+      const safeUrl = sanitizeExternalLinkUrl(match[2]);
+      if (safeUrl) {
+        result += `<a href="#" data-role="ext-link" data-url="${escapeHtml(safeUrl)}" class="text-[#0052cc] underline">${escapeHtml(match[1] || match[2])}</a>`;
+      } else {
+        result += escapeHtml(match[0]);
+      }
+    } else if (match[3] !== undefined) {
+      // 일반 텍스트에 그대로 노출된 URL. 끝에 붙은 문장부호는 링크에서 제외
+      let rawUrl = match[3];
+      let trailing = '';
+      const trailingMatch = rawUrl.match(/[),.!?;:]+$/);
+      if (trailingMatch) {
+        trailing = trailingMatch[0];
+        rawUrl = rawUrl.slice(0, -trailing.length);
+      }
+      const safeUrl = sanitizeExternalLinkUrl(rawUrl);
+      if (safeUrl) {
+        result += `<a href="#" data-role="ext-link" data-url="${escapeHtml(safeUrl)}" class="text-[#0052cc] underline">${escapeHtml(rawUrl)}</a>${escapeHtml(trailing)}`;
+      } else {
+        result += escapeHtml(match[0]);
+      }
     }
     lastIndex = LINK_REGEX.lastIndex;
   }
