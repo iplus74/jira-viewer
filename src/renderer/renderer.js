@@ -37,6 +37,12 @@ let appConfig = {
 let currentSelectedAiModule = 'copilot';
 
 // ---- 설정(SQLite DB + 인메모리 캐시) ----
+// 토큰은 DB(암호화)에만 보관하고 localStorage에 남아있는 기존 평문 복사본은 제거
+function purgeLegacyTokenStorage() {
+  localStorage.removeItem(STORAGE_KEYS.token);
+  localStorage.removeItem(STORAGE_KEYS.githubToken);
+}
+
 async function loadConfigFromDb() {
   try {
     let dbSettings = {};
@@ -59,6 +65,7 @@ async function loadConfigFromDb() {
         agyWorkDir: dbSettings.agyWorkDir ?? '',
         lastSearch: dbSettings.lastSearch ?? '{}'
       };
+      purgeLegacyTokenStorage();
     } else {
       // DB에 설정이 없으면 기존 localStorage 값으로 마이그레이션
       appConfig = {
@@ -77,6 +84,7 @@ async function loadConfigFromDb() {
       if (appConfig.jiraUrl || appConfig.email || appConfig.token || appConfig.downloadDir || appConfig.githubToken || appConfig.agyWorkDir) {
         if (window.settingsApi?.save) {
           await window.settingsApi.save(appConfig);
+          purgeLegacyTokenStorage();
         }
       }
     }
@@ -117,14 +125,13 @@ async function saveConfig(newValues) {
   // localStorage 동기화 (호환성 보장)
   localStorage.setItem(STORAGE_KEYS.jiraUrl, appConfig.jiraUrl || '');
   localStorage.setItem(STORAGE_KEYS.email, appConfig.email || '');
-  localStorage.setItem(STORAGE_KEYS.token, appConfig.token || '');
   localStorage.setItem(STORAGE_KEYS.downloadDir, appConfig.downloadDir || '');
   localStorage.setItem(STORAGE_KEYS.aiModule, appConfig.aiModule || 'copilot');
-  localStorage.setItem(STORAGE_KEYS.githubToken, appConfig.githubToken || '');
   localStorage.setItem(STORAGE_KEYS.aiModels, appConfig.aiModels || '');
   localStorage.setItem(STORAGE_KEYS.agySkill, appConfig.agySkill || 'jira-ai-task');
   localStorage.setItem(STORAGE_KEYS.agyWorkDir, appConfig.agyWorkDir || '');
   localStorage.setItem(STORAGE_KEYS.lastSearch, appConfig.lastSearch || '{}');
+  purgeLegacyTokenStorage();
 }
 
 // 콤마로 구분된 모델 목록 문자열을 공백 제거된 배열로 변환

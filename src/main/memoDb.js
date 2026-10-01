@@ -8,7 +8,7 @@
 
 const fs = require('fs');
 const path = require('path');
-const { app } = require('electron');
+const { app, safeStorage } = require('electron');
 const initSqlJs = require('sql.js');
 
 let dbInstance = null;
@@ -490,17 +490,60 @@ async function deleteNote(id) {
 }
 
 /**
+ * 민감 설정(토큰) 암호화: OS 자격 증명 저장소(macOS 키체인 등) 기반 safeStorage 사용
+ */
+const SENSITIVE_SETTING_KEYS = new Set(['token', 'githubToken']);
+const ENC_PREFIX = 'enc:v1:';
+
+function canEncrypt() {
+  try {
+    return safeStorage.isEncryptionAvailable();
+  } catch {
+    return false;
+  }
+}
+
+function encryptSettingValue(plain) {
+  if (!plain || !canEncrypt()) return plain;
+  return ENC_PREFIX + safeStorage.encryptString(plain).toString('base64');
+}
+
+// 암호문이 아니면(기존 평문 저장값) 그대로 반환
+function decryptSettingValue(stored) {
+  if (typeof stored !== 'string' || !stored.startsWith(ENC_PREFIX)) return stored;
+  try {
+    return safeStorage.decryptString(Buffer.from(stored.slice(ENC_PREFIX.length), 'base64'));
+  } catch (err) {
+    console.error('민감 설정 복호화 실패(키체인 변경/다른 PC의 DB 가능성):', err.message);
+    return '';
+  }
+}
+
+/**
  * 전체 설정 조회 (Key-Value 객체 반환)
  */
 async function getAllSettings() {
   const db = await getDb();
   const stmt = db.prepare('SELECT key, value FROM app_settings');
   const result = {};
+  const plaintextSensitive = {};
   while (stmt.step()) {
     const row = stmt.getAsObject();
-    result[row.key] = row.value;
+    if (SENSITIVE_SETTING_KEYS.has(row.key)) {
+      if (row.value && !row.value.startsWith(ENC_PREFIX)) {
+        plaintextSensitive[row.key] = row.value;
+      }
+      result[row.key] = decryptSettingValue(row.value);
+    } else {
+      result[row.key] = row.value;
+    }
   }
   stmt.free();
+
+  // 기존 평문 토큰을 암호화 형태로 마이그레이션
+  if (Object.keys(plaintextSensitive).length > 0 && canEncrypt()) {
+    await saveSettings(plaintextSensitive);
+  }
   return result;
 }
 
@@ -514,6 +557,7 @@ async function getSetting(key, defaultValue = '') {
   let value = defaultValue;
   if (stmt.step()) {
     value = stmt.getAsObject().value;
+    if (SENSITIVE_SETTING_KEYS.has(key)) value = decryptSettingValue(value);
   }
   stmt.free();
   return value;
@@ -537,7 +581,9 @@ async function saveSettings(settingsObj) {
     `);
     for (const [key, val] of Object.entries(settingsObj)) {
       if (val !== undefined && val !== null) {
-        stmt.run([key, typeof val === 'object' ? JSON.stringify(val) : String(val), now]);
+        let strVal = typeof val === 'object' ? JSON.stringify(val) : String(val);
+        if (SENSITIVE_SETTING_KEYS.has(key)) strVal = encryptSettingValue(strVal);
+        stmt.run([key, strVal, now]);
       }
     }
     stmt.free();
