@@ -204,6 +204,8 @@ const els = {
 
   // 개발 메모 추가 모달
   memoCreateModal: document.getElementById('memo-create-modal'),
+  memoCreatePanel: document.getElementById('memo-create-panel'),
+  memoCreateFullscreenBtn: document.getElementById('memo-create-fullscreen-btn'),
   memoCreateTitle: document.getElementById('memo-create-title'),
   memoCreateType: document.getElementById('memo-create-type'),
   memoCreateStatus: document.getElementById('memo-create-status'),
@@ -218,6 +220,8 @@ const els = {
 
   // 개발 메모 목록 모달
   memoListModal: document.getElementById('memo-list-modal'),
+  memoListPanel: document.getElementById('memo-list-panel'),
+  memoListFullscreenBtn: document.getElementById('memo-list-fullscreen-btn'),
   memoTotalCount: document.getElementById('memo-total-count'),
   memoFilterStart: document.getElementById('memo-filter-start'),
   memoFilterEnd: document.getElementById('memo-filter-end'),
@@ -236,6 +240,8 @@ const els = {
 
   // 개발 메모 상세 모달
   memoDetailModal: document.getElementById('memo-detail-modal'),
+  memoDetailPanel: document.getElementById('memo-detail-panel'),
+  memoDetailFullscreenBtn: document.getElementById('memo-detail-fullscreen-btn'),
   memoDetailHeaderTitle: document.getElementById('memo-detail-header-title'),
   memoDetailId: document.getElementById('memo-detail-id'),
   memoDetailTitle: document.getElementById('memo-detail-title'),
@@ -1401,6 +1407,7 @@ function openMemoCreateModal(initialData = {}) {
     els.memoCreateError.textContent = '';
     els.memoCreateError.classList.add('hidden');
   }
+  setModalFullscreen(els.memoCreatePanel, els.memoCreateFullscreenBtn, 'memoCreate', false);
   els.memoCreateModal.classList.remove('hidden');
   setTimeout(() => els.memoCreateTitle.focus(), 50);
 }
@@ -1452,6 +1459,43 @@ async function handleCreateMemo() {
 }
 
 // 2. 메모 목록 모달
+// 메모 목록/상세 모달의 "전체 화면" 토글용 크기 클래스 (앱 창 범위 내에서만 확장됨)
+const MODAL_FULLSCREEN_CLASSES = {
+  memoCreate: {
+    normal: ['w-[600px]', 'max-w-[92vw]', 'max-h-[90vh]', 'rounded-md'],
+    full: ['w-full', 'max-w-full', 'h-full', 'max-h-full', 'rounded-none']
+  },
+  memoList: {
+    normal: ['w-[1040px]', 'max-w-[96vw]', 'h-[85vh]', 'max-h-[85vh]', 'rounded-md'],
+    full: ['w-full', 'max-w-full', 'h-full', 'max-h-full', 'rounded-none']
+  },
+  memoDetail: {
+    normal: ['w-[680px]', 'max-w-[92vw]', 'max-h-[90vh]', 'rounded-md'],
+    full: ['w-full', 'max-w-full', 'h-full', 'max-h-full', 'rounded-none']
+  }
+};
+
+const SVG_ATTRS = 'width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"';
+const ICON_EXPAND = `<svg ${SVG_ATTRS}><path d="M10 2h4v4M6 14H2v-4M14 2l-4.5 4.5M2 14l4.5-4.5"/></svg>`;
+const ICON_RESTORE = `<svg ${SVG_ATTRS}><path d="M14 6h-4V2M2 10h4v4M10 6l4.5-4.5M6 10l-4.5 4.5"/></svg>`;
+
+function setModalFullscreen(panel, btn, key, isFull) {
+  if (!panel) return;
+  const { normal, full } = MODAL_FULLSCREEN_CLASSES[key];
+  panel.classList.remove(...(isFull ? normal : full));
+  panel.classList.add(...(isFull ? full : normal));
+  panel.dataset.fullscreen = isFull ? 'true' : 'false';
+  if (btn) {
+    btn.innerHTML = isFull ? ICON_RESTORE : ICON_EXPAND;
+    btn.title = isFull ? '원래 크기로' : '전체 화면';
+  }
+}
+
+function toggleModalFullscreen(panel, btn, key) {
+  if (!panel) return;
+  setModalFullscreen(panel, btn, key, panel.dataset.fullscreen !== 'true');
+}
+
 function openMemoListModal() {
   if (!els.memoListModal) return;
   if (!els.memoFilterStart.value) {
@@ -1460,6 +1504,7 @@ function openMemoListModal() {
   if (!els.memoFilterEnd.value) {
     els.memoFilterEnd.value = getTodayDateString();
   }
+  setModalFullscreen(els.memoListPanel, els.memoListFullscreenBtn, 'memoList', false);
   els.memoListModal.classList.remove('hidden');
   loadMemoList();
 }
@@ -1700,6 +1745,7 @@ async function openMemoDetailModal(noteId) {
       els.memoDetailError.classList.add('hidden');
     }
 
+    setModalFullscreen(els.memoDetailPanel, els.memoDetailFullscreenBtn, 'memoDetail', false);
     els.memoDetailModal.classList.remove('hidden');
   } catch (err) {
     console.error('메모 상세 조회 실패:', err);
@@ -1861,6 +1907,11 @@ if (els.memoCreateAddLinkBtn && els.memoCreateLinksContainer) {
 if (els.memoCreateSaveBtn) els.memoCreateSaveBtn.addEventListener('click', handleCreateMemo);
 if (els.memoCreateCancelBtn) els.memoCreateCancelBtn.addEventListener('click', closeMemoCreateModal);
 if (els.memoCreateCloseX) els.memoCreateCloseX.addEventListener('click', closeMemoCreateModal);
+if (els.memoCreateFullscreenBtn) {
+  els.memoCreateFullscreenBtn.addEventListener('click', () => {
+    toggleModalFullscreen(els.memoCreatePanel, els.memoCreateFullscreenBtn, 'memoCreate');
+  });
+}
 
 // 메모 목록 모달
 if (els.memoSearchBtn) els.memoSearchBtn.addEventListener('click', loadMemoList);
@@ -1902,6 +1953,11 @@ if (els.memoOpenCreateFromListBtn) {
 if (els.memoAiSummaryBtn) els.memoAiSummaryBtn.addEventListener('click', handleAiSummaryForNotes);
 if (els.memoListCloseBtn) els.memoListCloseBtn.addEventListener('click', closeMemoListModal);
 if (els.memoListCloseX) els.memoListCloseX.addEventListener('click', closeMemoListModal);
+if (els.memoListFullscreenBtn) {
+  els.memoListFullscreenBtn.addEventListener('click', () => {
+    toggleModalFullscreen(els.memoListPanel, els.memoListFullscreenBtn, 'memoList');
+  });
+}
 
 // 메모 상세 모달
 if (els.memoDetailAddContentBtn && els.memoDetailContentsContainer) {
@@ -1926,6 +1982,11 @@ if (els.memoDetailDeleteBtn) {
 }
 if (els.memoDetailBackBtn) els.memoDetailBackBtn.addEventListener('click', closeMemoDetailModal);
 if (els.memoDetailCloseX) els.memoDetailCloseX.addEventListener('click', closeMemoDetailModal);
+if (els.memoDetailFullscreenBtn) {
+  els.memoDetailFullscreenBtn.addEventListener('click', () => {
+    toggleModalFullscreen(els.memoDetailPanel, els.memoDetailFullscreenBtn, 'memoDetail');
+  });
+}
 
 // AI 요약 결과 모달
 if (els.memoAiCloseBtn) els.memoAiCloseBtn.addEventListener('click', closeMemoAiModal);

@@ -168,14 +168,17 @@
 
   <!-- 1. 개발 메모 추가 모달 -->
   <div id="memo-create-modal" class="fixed inset-0 bg-[rgba(9,30,66,0.54)] flex items-center justify-center hidden z-[60]">
-    <div class="bg-white rounded-md w-[600px] max-w-[92vw] max-h-[90vh] flex flex-col shadow-2xl overflow-hidden">
+    <div id="memo-create-panel" class="group bg-white rounded-md w-[600px] max-w-[92vw] max-h-[90vh] flex flex-col shadow-2xl overflow-hidden">
       <div class="flex justify-between items-center px-5 py-3.5 bg-[#0747a6] text-white">
         <h3 class="m-0 text-base font-bold flex items-center gap-2">
           <span>📝</span> 개발 메모 추가
         </h3>
-        <button id="memo-create-close-x" class="cursor-pointer border-0 bg-transparent text-white text-lg leading-none hover:opacity-80">✕</button>
+        <div class="flex items-center gap-1">
+          <button id="memo-create-fullscreen-btn" title="전체 화면" class="cursor-pointer border-0 bg-transparent text-white leading-none hover:opacity-80 px-1 flex items-center"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M10 2h4v4M6 14H2v-4M14 2l-4.5 4.5M2 14l4.5-4.5"/></svg></button>
+          <button id="memo-create-close-x" class="cursor-pointer border-0 bg-transparent text-white text-lg leading-none hover:opacity-80">✕</button>
+        </div>
       </div>
-      <div class="p-5 overflow-y-auto flex flex-col gap-3.5">
+      <div class="p-5 overflow-y-auto flex-1 min-h-0 flex flex-col gap-3.5">
         <div class="flex flex-col gap-1">
           <label for="memo-create-title" class="text-[13px] font-semibold text-[#42526e]">제목 <span class="text-red-500">*</span></label>
           <input type="text" id="memo-create-title" placeholder="메모 제목을 입력하세요" class="px-3 py-2 border border-[#dfe1e6] rounded text-sm focus:border-[#0052cc] outline-none font-medium" />
@@ -198,14 +201,14 @@
             </select>
           </div>
         </div>
-        <div class="flex flex-col gap-1.5">
+        <div class="flex flex-col gap-1.5 group-data-[fullscreen=true]:flex-1 group-data-[fullscreen=true]:min-h-0">
           <div class="flex justify-between items-center">
             <label class="text-[13px] font-semibold text-[#42526e]">내용</label>
             <button type="button" id="memo-create-add-content-btn" class="cursor-pointer border-0 bg-transparent text-xs text-[#0052cc] hover:underline font-semibold flex items-center gap-0.5">
               <span>+</span> 내용 추가
             </button>
           </div>
-          <div id="memo-create-contents-container" class="flex flex-col gap-3 max-h-72 overflow-y-auto pr-1">
+          <div id="memo-create-contents-container" class="flex flex-col gap-3 max-h-72 overflow-y-auto pr-1 group-data-[fullscreen=true]:max-h-none group-data-[fullscreen=true]:flex-1 group-data-[fullscreen=true]:min-h-0">
             <!-- 동적 내용 블록 row (작성일시 + 내용 textarea) -->
           </div>
         </div>
@@ -216,7 +219,7 @@
               <span>+</span> 링크 추가
             </button>
           </div>
-          <div id="memo-create-links-container" class="flex flex-col gap-2 max-h-32 overflow-y-auto">
+          <div id="memo-create-links-container" class="flex flex-col gap-2 max-h-32 overflow-y-auto group-data-[fullscreen=true]:max-h-60">
             <!-- 동적 링크 인풋 row -->
           </div>
         </div>
@@ -231,7 +234,7 @@
 
   <!-- 2. 개발 메모 목록 조회 모달 -->
   <div id="memo-list-modal" class="fixed inset-0 bg-[rgba(9,30,66,0.54)] flex items-center justify-center hidden z-50">
-    <div class="bg-white rounded-md w-[1040px] max-w-[96vw] h-[85vh] max-h-[85vh] flex flex-col shadow-2xl overflow-hidden">
+    <div id="memo-list-panel" class="bg-white rounded-md w-[1040px] max-w-[96vw] h-[85vh] max-h-[85vh] flex flex-col shadow-2xl overflow-hidden">
       <!-- 모달 헤더 -->
       <div class="shrink-0 flex justify-between items-center px-5 py-3.5 bg-[#0747a6] text-white">
         <div class="flex items-center gap-3">
@@ -240,7 +243,10 @@
           </h3>
           <span id="memo-total-count" class="text-xs bg-[rgba(255,255,255,0.2)] px-2 py-0.5 rounded text-white">총 0건</span>
         </div>
-        <button id="memo-list-close-x" class="cursor-pointer border-0 bg-transparent text-white text-lg leading-none hover:opacity-80">✕</button>
+        <div class="flex items-center gap-1">
+          <button id="memo-list-fullscreen-btn" title="전체 화면" class="cursor-pointer border-0 bg-transparent text-white leading-none hover:opacity-80 px-1 flex items-center"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M10 2h4v4M6 14H2v-4M14 2l-4.5 4.5M2 14l4.5-4.5"/></svg></button>
+          <button id="memo-list-close-x" class="cursor-pointer border-0 bg-transparent text-white text-lg leading-none hover:opacity-80">✕</button>
+        </div>
       </div>
 
       <!-- 2.1 검색 옵션 바 -->
@@ -320,14 +326,17 @@
 
   <!-- 3. 개발 메모 상세 및 수정 모달 -->
   <div id="memo-detail-modal" class="fixed inset-0 bg-[rgba(9,30,66,0.54)] flex items-center justify-center hidden z-[60]">
-    <div class="bg-white rounded-md w-[680px] max-w-[92vw] max-h-[90vh] flex flex-col shadow-2xl overflow-hidden">
+    <div id="memo-detail-panel" class="group bg-white rounded-md w-[680px] max-w-[92vw] max-h-[90vh] flex flex-col shadow-2xl overflow-hidden">
       <div class="flex justify-between items-center px-5 py-3.5 bg-[#0747a6] text-white">
         <h3 id="memo-detail-header-title" class="m-0 text-base font-bold flex items-center gap-2">
           <span>📄</span> 개발 메모 상세
         </h3>
-        <button id="memo-detail-close-x" class="cursor-pointer border-0 bg-transparent text-white text-lg leading-none hover:opacity-80">✕</button>
+        <div class="flex items-center gap-1">
+          <button id="memo-detail-fullscreen-btn" title="전체 화면" class="cursor-pointer border-0 bg-transparent text-white leading-none hover:opacity-80 px-1 flex items-center"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M10 2h4v4M6 14H2v-4M14 2l-4.5 4.5M2 14l4.5-4.5"/></svg></button>
+          <button id="memo-detail-close-x" class="cursor-pointer border-0 bg-transparent text-white text-lg leading-none hover:opacity-80">✕</button>
+        </div>
       </div>
-      <div class="p-5 overflow-y-auto flex flex-col gap-3.5">
+      <div class="p-5 overflow-y-auto flex-1 min-h-0 flex flex-col gap-3.5">
         <input type="hidden" id="memo-detail-id" />
         <div class="flex justify-between items-center">
           <div id="memo-detail-meta" class="text-xs text-[#6b778c]"></div>
@@ -354,14 +363,14 @@
             </select>
           </div>
         </div>
-        <div class="flex flex-col gap-1.5">
+        <div class="flex flex-col gap-1.5 group-data-[fullscreen=true]:flex-1 group-data-[fullscreen=true]:min-h-0">
           <div class="flex justify-between items-center">
             <label class="text-[13px] font-semibold text-[#42526e]">내용 목록</label>
             <button type="button" id="memo-detail-add-content-btn" class="cursor-pointer border-0 bg-transparent text-xs text-[#0052cc] hover:underline font-semibold flex items-center gap-0.5">
               <span>+</span> 내용 추가
             </button>
           </div>
-          <div id="memo-detail-contents-container" class="flex flex-col gap-3 max-h-80 overflow-y-auto pr-1">
+          <div id="memo-detail-contents-container" class="flex flex-col gap-3 max-h-80 overflow-y-auto pr-1 group-data-[fullscreen=true]:max-h-none group-data-[fullscreen=true]:flex-1 group-data-[fullscreen=true]:min-h-0">
             <!-- 동적 내용 블록 row (작성일시 + 내용 textarea + 삭제버튼) -->
           </div>
         </div>
@@ -372,7 +381,7 @@
               <span>+</span> 링크 추가
             </button>
           </div>
-          <div id="memo-detail-links-container" class="flex flex-col gap-2 max-h-32 overflow-y-auto">
+          <div id="memo-detail-links-container" class="flex flex-col gap-2 max-h-32 overflow-y-auto group-data-[fullscreen=true]:max-h-60">
             <!-- 동적 링크 인풋 row -->
           </div>
         </div>
