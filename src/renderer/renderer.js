@@ -619,23 +619,39 @@ let mentionDebounceTimer = null;
 
 // ---- 댓글 작성 시 첨부 이미지/파일 관리 상태 (inputId -> 절대 경로 배열) ----
 const commentAttachmentsState = new Map();
+const IMAGE_EXTENSIONS = new Set(['.jpg', '.jpeg', '.png', '.gif', '.webp', '.svg', '.bmp']);
 
 function getFileBaseName(filePath) {
   return String(filePath).split(/[\\/]/).pop();
 }
 
+function isImageFile(filePath) {
+  const match = String(filePath).toLowerCase().match(/\.[^.]+$/);
+  return !!match && IMAGE_EXTENSIONS.has(match[0]);
+}
+
+// 이미지는 작성 중에도 썸네일로, 그 외 파일은 파일명 칩으로 미리보기
 function renderAttachmentChips(inputId) {
   const container = document.getElementById(`attachments-list-${inputId}`);
   if (!container) return;
   const files = commentAttachmentsState.get(inputId) || [];
   container.innerHTML = files
-    .map(
-      (filePath) => `
-    <span class="inline-flex items-center gap-1 px-2 py-1 bg-white border border-[#dfe1e6] rounded text-xs text-[#42526e]">
-      📎 ${escapeHtml(getFileBaseName(filePath))}
-      <button type="button" class="btn-remove-attachment cursor-pointer bg-transparent border-0 text-[#6b778c] hover:text-[#de350b] leading-none p-0" data-input-id="${inputId}" data-path="${escapeHtml(filePath)}">✕</button>
-    </span>`
-    )
+    .map((filePath) => {
+      const safePath = escapeHtml(filePath);
+      const safeName = escapeHtml(getFileBaseName(filePath));
+      if (isImageFile(filePath)) {
+        return `
+        <span class="relative inline-block">
+          <img src="${toFileUrl(filePath)}" alt="${safeName}" class="h-16 w-16 object-cover border border-[#dfe1e6] rounded" />
+          <button type="button" class="btn-remove-attachment absolute -top-1.5 -right-1.5 w-4 h-4 flex items-center justify-center bg-[#42526e] text-white rounded-full text-[10px] leading-none cursor-pointer border-0" data-input-id="${inputId}" data-path="${safePath}">✕</button>
+        </span>`;
+      }
+      return `
+      <span class="inline-flex items-center gap-1 px-2 py-1 bg-white border border-[#dfe1e6] rounded text-xs text-[#42526e]">
+        📎 ${safeName}
+        <button type="button" class="btn-remove-attachment cursor-pointer bg-transparent border-0 text-[#6b778c] hover:text-[#de350b] leading-none p-0" data-input-id="${inputId}" data-path="${safePath}">✕</button>
+      </span>`;
+    })
     .join('');
 }
 let mentionSearchSeq = 0;
