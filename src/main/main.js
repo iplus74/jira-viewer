@@ -160,6 +160,12 @@ function buildJiraConfig(payload) {
   return { jiraUrl: jiraUrl.replace(/\/$/, ''), email, token };
 }
 
+// 사용자가 다운로드 폴더를 지정하지 않은 경우에도 첨부파일 미리보기가 항상 표시되도록 앱 캐시 폴더로 대체
+function resolveDownloadDir(downloadDir) {
+  if (downloadDir) return downloadDir;
+  return path.join(app.getPath('userData'), 'attachment-cache');
+}
+
 function isSafeHttpUrl(value) {
   try {
     const parsed = new URL(String(value));
@@ -227,7 +233,7 @@ ipcMain.handle('jira:search', async (_event, payload) => {
 // 이슈 상세 조회
 ipcMain.handle('jira:getIssue', async (_event, payload) => {
   const config = buildJiraConfig(payload);
-  return jiraClient.getIssueDetail(payload.issueKey, config, payload.downloadDir);
+  return jiraClient.getIssueDetail(payload.issueKey, config, resolveDownloadDir(payload.downloadDir));
 });
 
 // 이슈 상태 변경 가능한 트랜지션 목록 조회
@@ -240,7 +246,7 @@ ipcMain.handle('jira:getTransitions', async (_event, payload) => {
 ipcMain.handle('jira:transitionIssue', async (_event, payload) => {
   const config = buildJiraConfig(payload);
   await jiraClient.transitionIssueStatus(payload.issueKey, payload.targetStatusName, config);
-  return jiraClient.getIssueDetail(payload.issueKey, config, payload.downloadDir);
+  return jiraClient.getIssueDetail(payload.issueKey, config, resolveDownloadDir(payload.downloadDir));
 });
 
 // 사용자 검색 (맨션 자동완성용)
@@ -249,11 +255,29 @@ ipcMain.handle('jira:searchUsers', async (_event, payload) => {
   return jiraClient.searchUsers(payload.query, config, payload.issueKey);
 });
 
-// 댓글 및 대댓글 등록
+// 댓글 및 대댓글 등록 (이미지/첨부파일 동시 첨부 가능)
 ipcMain.handle('jira:addComment', async (_event, payload) => {
   const config = buildJiraConfig(payload);
-  await jiraClient.addComment(payload.issueKey, payload.commentText, payload.parentId, config, payload.mentions);
-  return jiraClient.getIssueDetail(payload.issueKey, config, payload.downloadDir);
+  const { uploadedAttachments } = await jiraClient.addComment(
+    payload.issueKey,
+    payload.commentText,
+    payload.parentId,
+    config,
+    payload.mentions,
+    payload.filePaths
+  );
+  return jiraClient.getIssueDetail(payload.issueKey, config, resolveDownloadDir(payload.downloadDir), uploadedAttachments);
+});
+
+// 댓글에 첨부할 이미지/파일 선택 다이얼로그
+ipcMain.handle('dialog:chooseCommentAttachments', async () => {
+  const result = await dialog.showOpenDialog(mainWindow, {
+    properties: ['openFile', 'multiSelections']
+  });
+  if (result.canceled || !result.filePaths.length) {
+    return [];
+  }
+  return result.filePaths;
 });
 
 // 웹 브라우저로 이슈 열기 (Chrome 우선 실행, mailto는 기본 메일 앱으로 실행)

@@ -646,7 +646,7 @@ async function resolveAccountId(emailOrAccountId, config) {
 /**
  * 이슈 상세 조회. downloadIssue()/getIssueDetails() 포맷 참고.
  */
-async function getIssueDetail(issueKey, config, downloadDir = null) {
+async function getIssueDetail(issueKey, config, downloadDir = null, extraAttachments = []) {
   const headers = buildAuthHeaders(config);
   const issueUrl = new URL(`${config.jiraUrl}/rest/api/3/issue/${issueKey}`);
   issueUrl.searchParams.append('fields', 'summary,description,comment,attachment,status,assignee');
@@ -662,6 +662,14 @@ async function getIssueDetail(issueKey, config, downloadDir = null) {
   const summary = fields.summary || '제목 없음';
   const rawDescription = fields.description;
   const attachments = fields.attachment || [];
+
+  // 방금 업로드한 첨부파일이 Jira 목록 조회에 아직 반영되지 않았을 수 있어 병합
+  for (const extra of extraAttachments || []) {
+    if (!attachments.some((att) => String(att.id) === String(extra.id))) {
+      attachments.push(extra);
+    }
+  }
+
   const status = fields.status?.name || '알 수 없음';
   const assignee = fields.assignee?.displayName || '미배정';
   const descriptionText =
@@ -696,7 +704,7 @@ async function getIssueDetail(issueKey, config, downloadDir = null) {
     });
   }
 
-  const attachmentList = (fields.attachment || []).map((att) => ({
+  const attachmentList = attachments.map((att) => ({
     id: att.id,
     filename: att.filename,
     mimeType: att.mimeType,
@@ -817,16 +825,94 @@ function textToAdfDoc(text, mentions = []) {
   };
 }
 
+const EXT_MIME_MAP = {
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.png': 'image/png',
+  '.gif': 'image/gif',
+  '.webp': 'image/webp',
+  '.svg': 'image/svg+xml',
+  '.pdf': 'application/pdf',
+  '.txt': 'text/plain',
+  '.zip': 'application/zip'
+};
+
+function guessMimeType(filePath) {
+  return EXT_MIME_MAP[path.extname(filePath).toLowerCase()] || 'application/octet-stream';
+}
+
+function getAttachmentIcon(mimeType) {
+  const type = mimeType || '';
+  if (type.startsWith('image/')) return '🖼️';
+  if (type.startsWith('video/')) return '🎞️';
+  if (type.startsWith('audio/')) return '🎵';
+  if (type === 'application/pdf') return '📄';
+  if (type === 'application/zip') return '🗜️';
+  return '📎';
+}
+
 /**
- * 특정 이슈에 댓글 또는 대댓글(답글) 등록
+ * 로컬 파일들을 이슈 첨부파일로 업로드하고 업로드된 첨부파일 메타데이터 배열 반환
  */
-async function addComment(issueKey, commentText, parentId, config, mentions = []) {
+async function uploadAttachments(issueKey, filePaths, config) {
+  if (!filePaths || filePaths.length === 0) return [];
+
+  const { Authorization } = buildAuthHeaders(config);
+  const headers = { Authorization, Accept: 'application/json', 'X-Atlassian-Token': 'no-check' };
+  const url = `${config.jiraUrl}/rest/api/3/issue/${issueKey}/attachments`;
+
+  const form = new FormData();
+  for (const filePath of filePaths) {
+    const buffer = fs.readFileSync(filePath);
+    const filename = path.basename(filePath);
+    form.append('file', new Blob([buffer], { type: guessMimeType(filePath) }), filename);
+  }
+
+  const response = await fetch(url, { method: 'POST', headers, body: form });
+  if (!response.ok) {
+    throw new Error(`Jira 첨부파일 업로드 실패 (${response.status}): ${await response.text()}`);
+  }
+  return await response.json();
+}
+
+/**
+ * 특정 이슈에 댓글 또는 대댓글(답글) 등록 (이미지/첨부파일 동시 첨부 가능)
+ *
+ * 참고: 업로드한 첨부파일을 댓글 본문에 ADF media 노드로 직접 삽입하면 Jira가
+ * "ATTACHMENT_VALIDATION_ERROR"로 거부한다(클래식 첨부 업로드는 즉시 참조 가능한
+ * Media API 컬렉션에 등록되지 않음). 따라서 파일은 이슈 첨부파일로 업로드만 하고,
+ * 댓글 본문에는 다운로드 링크 형태로 참조를 남긴다.
+ */
+async function addComment(issueKey, commentText, parentId, config, mentions = [], attachmentPaths = []) {
   const headers = buildAuthHeaders(config);
   const commentUrl = `${config.jiraUrl}/rest/api/3/issue/${issueKey}/comment`;
 
-  const bodyData = {
-    body: textToAdfDoc(commentText, mentions)
-  };
+  const adfDoc = textToAdfDoc(commentText, mentions);
+  let uploaded = [];
+
+  if (attachmentPaths && attachmentPaths.length > 0) {
+    uploaded = await uploadAttachments(issueKey, attachmentPaths, config);
+
+    // 텍스트 없이 첨부파일만 등록하는 경우 자동 생성된 빈 문단은 제거
+    if (!commentText || !commentText.trim()) {
+      adfDoc.content = adfDoc.content.filter((node) => node.type !== 'paragraph' || (node.content && node.content.length > 0));
+    }
+
+    for (const att of uploaded) {
+      adfDoc.content.push({
+        type: 'paragraph',
+        content: [
+          {
+            type: 'text',
+            text: `${getAttachmentIcon(att.mimeType)} ${att.filename}`,
+            marks: [{ type: 'link', attrs: { href: att.content } }]
+          }
+        ]
+      });
+    }
+  }
+
+  const bodyData = { body: adfDoc };
 
   if (parentId) {
     bodyData.parentId = String(parentId);
@@ -838,12 +924,14 @@ async function addComment(issueKey, commentText, parentId, config, mentions = []
     body: JSON.stringify(bodyData)
   });
 
+
   if (!response.ok) {
     const errText = await response.text();
     throw new Error(`Jira 댓글 등록 실패 (${response.status}): ${errText}`);
   }
 
-  return await response.json();
+  const comment = await response.json();
+  return { comment, uploadedAttachments: uploaded };
 }
 
 module.exports = {

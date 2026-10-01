@@ -464,7 +464,9 @@ function escapeHtml(str) {
   return String(str)
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;');
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
 }
 
 // 1초 후 자동으로 사라지는 토스트 팝업 표시
@@ -614,6 +616,28 @@ let currentActiveMentionInput = null;
 let currentMentionQueryStart = -1;
 let currentMentionQueryEnd = -1;
 let mentionDebounceTimer = null;
+
+// ---- 댓글 작성 시 첨부 이미지/파일 관리 상태 (inputId -> 절대 경로 배열) ----
+const commentAttachmentsState = new Map();
+
+function getFileBaseName(filePath) {
+  return String(filePath).split(/[\\/]/).pop();
+}
+
+function renderAttachmentChips(inputId) {
+  const container = document.getElementById(`attachments-list-${inputId}`);
+  if (!container) return;
+  const files = commentAttachmentsState.get(inputId) || [];
+  container.innerHTML = files
+    .map(
+      (filePath) => `
+    <span class="inline-flex items-center gap-1 px-2 py-1 bg-white border border-[#dfe1e6] rounded text-xs text-[#42526e]">
+      📎 ${escapeHtml(getFileBaseName(filePath))}
+      <button type="button" class="btn-remove-attachment cursor-pointer bg-transparent border-0 text-[#6b778c] hover:text-[#de350b] leading-none p-0" data-input-id="${inputId}" data-path="${escapeHtml(filePath)}">✕</button>
+    </span>`
+    )
+    .join('');
+}
 let mentionSearchSeq = 0;
 
 function getOrCreateMentionDropdown() {
@@ -802,9 +826,13 @@ function renderIssueDetail(detail) {
           
           <div id="reply-form-${c.id}" class="hidden mt-2 mb-3 p-2.5 bg-[#fafbfc] border border-[#dfe1e6] rounded">
             <textarea id="reply-input-${c.id}" rows="2" class="reply-textarea w-full p-2 border border-[#dfe1e6] rounded text-xs focus:outline-none focus:border-[#0052cc] resize-y" placeholder="답글을 입력하세요... (@로 사용자 검색)"></textarea>
-            <div class="flex justify-end gap-2 mt-1.5">
-              <button class="btn-cancel-reply px-2.5 py-1 bg-[#ebecf0] hover:bg-[#dfe1e6] text-[#172b4d] text-xs font-medium rounded cursor-pointer border-0" data-comment-id="${c.id}">취소</button>
-              <button class="btn-submit-reply px-2.5 py-1 bg-[#0052cc] hover:bg-[#0065ff] text-white text-xs font-semibold rounded cursor-pointer border-0" data-comment-id="${c.id}">답글 등록</button>
+            <div id="attachments-list-reply-input-${c.id}" class="flex flex-wrap gap-1.5 mt-1.5"></div>
+            <div class="flex justify-between items-center gap-2 mt-1.5">
+              <button class="btn-attach-files px-2.5 py-1 bg-[#ebecf0] hover:bg-[#dfe1e6] text-[#42526e] text-xs font-medium rounded cursor-pointer border-0" data-input-id="reply-input-${c.id}">📎 파일 첨부</button>
+              <div class="flex gap-2">
+                <button class="btn-cancel-reply px-2.5 py-1 bg-[#ebecf0] hover:bg-[#dfe1e6] text-[#172b4d] text-xs font-medium rounded cursor-pointer border-0" data-comment-id="${c.id}">취소</button>
+                <button class="btn-submit-reply px-2.5 py-1 bg-[#0052cc] hover:bg-[#0065ff] text-white text-xs font-semibold rounded cursor-pointer border-0" data-comment-id="${c.id}">답글 등록</button>
+              </div>
             </div>
           </div>
 
@@ -818,7 +846,9 @@ function renderIssueDetail(detail) {
     <div class="mt-4 mb-6 p-3 bg-[#f4f5f7] rounded border border-[#dfe1e6]">
       <div class="text-sm font-bold mb-1.5 text-[#172b4d]">새 댓글 작성</div>
       <textarea id="new-comment-input" rows="3" class="w-full p-2 border border-[#dfe1e6] rounded text-sm focus:outline-none focus:border-[#0052cc] resize-y" placeholder="댓글을 입력하세요... (@로 사용자 검색)"></textarea>
-      <div class="flex justify-end mt-2">
+      <div id="attachments-list-new-comment-input" class="flex flex-wrap gap-1.5 mt-2"></div>
+      <div class="flex justify-between items-center mt-2">
+        <button id="btn-attach-comment-files" class="btn-attach-files px-2.5 py-1.5 bg-[#ebecf0] hover:bg-[#dfe1e6] text-[#42526e] text-xs font-medium rounded cursor-pointer border-0" data-input-id="new-comment-input">📎 파일 첨부</button>
         <button id="btn-submit-comment" class="px-3 py-1.5 bg-[#0052cc] hover:bg-[#0065ff] text-white text-xs font-semibold rounded cursor-pointer transition-colors border-0">댓글 작성</button>
       </div>
     </div>
@@ -867,13 +897,43 @@ els.issueDetail.addEventListener('click', async (e) => {
     return;
   }
 
+  // 댓글/답글 첨부파일 선택 버튼 클릭
+  const attachBtn = e.target.closest('.btn-attach-files');
+  if (attachBtn) {
+    const inputId = attachBtn.dataset.inputId;
+    try {
+      const filePaths = await window.jiraApi.chooseCommentAttachments();
+      if (filePaths && filePaths.length > 0) {
+        const existing = commentAttachmentsState.get(inputId) || [];
+        const merged = Array.from(new Set([...existing, ...filePaths]));
+        commentAttachmentsState.set(inputId, merged);
+        renderAttachmentChips(inputId);
+      }
+    } catch (err) {
+      showToast(`파일 선택 실패: ${err.message}`);
+    }
+    return;
+  }
+
+  // 첨부파일 삭제(x) 버튼 클릭
+  const removeAttachmentBtn = e.target.closest('.btn-remove-attachment');
+  if (removeAttachmentBtn) {
+    const inputId = removeAttachmentBtn.dataset.inputId;
+    const filePath = removeAttachmentBtn.dataset.path;
+    const existing = commentAttachmentsState.get(inputId) || [];
+    commentAttachmentsState.set(inputId, existing.filter((p) => p !== filePath));
+    renderAttachmentChips(inputId);
+    return;
+  }
+
   // 새 댓글 작성 버튼 클릭
   const submitCommentBtn = e.target.closest('#btn-submit-comment');
   if (submitCommentBtn) {
     const input = document.getElementById('new-comment-input');
     const text = input ? input.value.trim() : '';
-    if (!text) {
-      showToast('댓글 내용을 입력해 주세요.');
+    const filePaths = commentAttachmentsState.get('new-comment-input') || [];
+    if (!text && filePaths.length === 0) {
+      showToast('댓글 내용을 입력하거나 파일을 첨부해 주세요.');
       return;
     }
     submitCommentBtn.disabled = true;
@@ -887,10 +947,12 @@ els.issueDetail.addEventListener('click', async (e) => {
         ...getJiraConfigPayload(),
         issueKey: state.currentIssueKey,
         commentText: text,
-        mentions
+        mentions,
+        filePaths
       };
       const detail = await window.jiraApi.addComment(payload);
       mentionsState.delete('new-comment-input');
+      commentAttachmentsState.delete('new-comment-input');
       renderIssueDetail(detail);
       showToast('댓글이 등록되었습니다.');
     } catch (err) {
@@ -925,6 +987,9 @@ els.issueDetail.addEventListener('click', async (e) => {
       form.classList.add('hidden');
       const replyInput = document.getElementById(`reply-input-${commentId}`);
       if (replyInput) replyInput.value = '';
+      const inputId = `reply-input-${commentId}`;
+      commentAttachmentsState.delete(inputId);
+      renderAttachmentChips(inputId);
     }
     return;
   }
@@ -935,14 +1000,15 @@ els.issueDetail.addEventListener('click', async (e) => {
     const commentId = submitReplyBtn.dataset.commentId;
     const input = document.getElementById(`reply-input-${commentId}`);
     const text = input ? input.value.trim() : '';
-    if (!text) {
-      showToast('답글 내용을 입력해 주세요.');
+    const inputId = `reply-input-${commentId}`;
+    const filePaths = commentAttachmentsState.get(inputId) || [];
+    if (!text && filePaths.length === 0) {
+      showToast('답글 내용을 입력하거나 파일을 첨부해 주세요.');
       return;
     }
     submitReplyBtn.disabled = true;
     submitReplyBtn.textContent = '등록 중...';
     try {
-      const inputId = `reply-input-${commentId}`;
       const mentions = mentionsState.has(inputId)
         ? Array.from(mentionsState.get(inputId).values())
         : [];
@@ -952,10 +1018,12 @@ els.issueDetail.addEventListener('click', async (e) => {
         issueKey: state.currentIssueKey,
         commentText: text,
         parentId: commentId,
-        mentions
+        mentions,
+        filePaths
       };
       const detail = await window.jiraApi.addComment(payload);
       mentionsState.delete(inputId);
+      commentAttachmentsState.delete(inputId);
       renderIssueDetail(detail);
       showToast('답글이 등록되었습니다.');
     } catch (err) {
