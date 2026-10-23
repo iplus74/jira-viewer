@@ -492,6 +492,14 @@ function showToast(message) {
   setTimeout(() => toast.remove(), 2000);
 }
 
+// 네이티브 다이얼로그 기반 confirm (Chromium focus 유실 방지)
+async function showConfirm(message, title = '확인') {
+  if (window.appApi?.confirm) {
+    return await window.appApi.confirm({ message, title });
+  }
+  return window.confirm(message);
+}
+
 function sanitizeHttpUrl(urlValue) {
   if (!urlValue) return '';
   try {
@@ -1094,7 +1102,7 @@ els.statusApplyBtn.addEventListener('click', async () => {
     renderStatusOptions(transitions, detail.status);
     showToast('적용되었습니다');
   } catch (err) {
-    alert(`상태 변경 실패: ${err.message}`);
+    showToast(`상태 변경 실패: ${err.message}`);
   } finally {
     els.statusApplyBtn.disabled = false;
   }
@@ -1775,9 +1783,10 @@ function getMemoDetailSnapshot() {
   ]);
 }
 
-function requestCloseMemoDetail() {
+async function requestCloseMemoDetail() {
   if (memoState.detailSnapshot !== undefined && getMemoDetailSnapshot() !== memoState.detailSnapshot) {
-    if (!confirm('저장하지 않은 변경 내용이 있습니다. 닫으시겠습니까?')) return;
+    const ok = await showConfirm('저장하지 않은 변경 내용이 있습니다. 닫으시겠습니까?');
+    if (!ok) return;
   }
   closeMemoDetailModal();
 }
@@ -1832,7 +1841,8 @@ async function handleUpdateMemo() {
 }
 
 async function handleDeleteMemo(id) {
-  if (!confirm('정말 삭제하시겠습니까?')) {
+  const ok = await showConfirm('정말 삭제하시겠습니까?');
+  if (!ok) {
     return;
   }
   try {
@@ -1851,7 +1861,7 @@ async function handleDeleteMemo(id) {
 // 4. 선택된 메모 대상 AI 요약
 async function handleAiSummaryForNotes() {
   if (memoState.selectedIds.size === 0) {
-    alert('AI 요약을 생성할 메모를 1개 이상 선택해 주세요.');
+    showToast('AI 요약을 생성할 메모를 1개 이상 선택해 주세요.');
     return;
   }
 
@@ -2103,7 +2113,10 @@ async function runTransfer() {
   }
   const { mode, kind } = transferState;
   const kindLabel = kind === 'memo' ? '메모' : '설정';
-  if (mode === 'import' && !confirm(`기존 ${kindLabel} 데이터가 가져온 데이터로 덮어쓰기 됩니다. 계속하시겠습니까?`)) return;
+  if (mode === 'import') {
+    const ok = await showConfirm(`기존 ${kindLabel} 데이터가 가져온 데이터로 덮어쓰기 됩니다. 계속하시겠습니까?`);
+    if (!ok) return;
+  }
 
   transferEls.runBtn.disabled = true;
   try {

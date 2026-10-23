@@ -19,6 +19,7 @@ process.on('unhandledRejection', (err) => {
 
 function sendTransfer(mode, kind) {
   if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.focus();
     mainWindow.webContents.send('menu:data-transfer', { mode, kind });
   }
 }
@@ -314,6 +315,24 @@ ipcMain.handle('settings:chooseDownloadFolder', async () => {
     return null;
   }
   return result.filePaths[0];
+});
+
+// 확인 대화상자 (Chromium focus 유실 방지용 네이티브 다이얼로그)
+ipcMain.handle('app:confirm', async (_event, options) => {
+  const message = typeof options === 'string' ? options : (options?.message || '');
+  const title = (typeof options === 'object' && options?.title) || '확인';
+  const result = await dialog.showMessageBox(mainWindow, {
+    type: 'question',
+    buttons: ['취소', '확인'],
+    defaultId: 1,
+    cancelId: 0,
+    title,
+    message
+  });
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.focus();
+  }
+  return result.response === 1;
 });
 
 // 내보내기/가져오기

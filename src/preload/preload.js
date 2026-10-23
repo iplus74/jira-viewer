@@ -59,4 +59,8 @@ contextBridge.exposeInMainWorld('settingsApi', {
   save: (settingsObj) => ipcRenderer.invoke('settings:save', settingsObj)
 });
 
+contextBridge.exposeInMainWorld('appApi', {
+  confirm: (options) => ipcRenderer.invoke('app:confirm', options)
+});
+
 
