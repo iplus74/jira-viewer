@@ -262,7 +262,8 @@ const els = {
   memoDetailError: document.getElementById('memo-detail-error'),
   memoDetailDeleteBtn: document.getElementById('memo-detail-delete-btn'),
   memoDetailSaveBtn: document.getElementById('memo-detail-save-btn'),
-  memoDetailBackBtn: document.getElementById('memo-detail-back-btn'),
+  memoDetailBackBtn: document.getElementById('memo-detail-close-btn'),
+  memoDetailSaveStatus: document.getElementById('memo-detail-save-status'),
   memoDetailCloseX: document.getElementById('memo-detail-close-x'),
 
   // 개발 메모 AI 요약 모달
@@ -1064,10 +1065,14 @@ els.issueDetail.addEventListener('click', async (e) => {
   }
 });
 
-els.openBrowserBtn.addEventListener('click', () => {
+els.openBrowserBtn.addEventListener('click', async () => {
   if (state.currentIssueKey) {
     const cfg = loadConfig();
-    window.jiraApi.openInBrowser(`${cfg.jiraUrl}/browse/${state.currentIssueKey}`);
+    try {
+      await window.jiraApi.openInBrowser(`${cfg.jiraUrl}/browse/${state.currentIssueKey}`);
+    } catch (err) {
+      showToast(`링크를 열 수 없습니다: ${err.message}`);
+    }
   }
 });
 
@@ -1508,9 +1513,7 @@ function openMemoListModal() {
   if (!els.memoFilterStart.value) {
     els.memoFilterStart.value = getTwoWeeksAgoDateString();
   }
-  if (!els.memoFilterEnd.value) {
-    els.memoFilterEnd.value = getTodayDateString();
-  }
+  els.memoFilterEnd.value = getTodayDateString();
   setModalFullscreen(els.memoListPanel, els.memoListFullscreenBtn, 'memoList', false);
   els.memoListModal.classList.remove('hidden');
   loadMemoList();
@@ -1753,11 +1756,30 @@ async function openMemoDetailModal(noteId) {
     }
 
     setModalFullscreen(els.memoDetailPanel, els.memoDetailFullscreenBtn, 'memoDetail', false);
+    if (els.memoDetailSaveStatus) els.memoDetailSaveStatus.classList.add('hidden');
     els.memoDetailModal.classList.remove('hidden');
+    memoState.detailSnapshot = getMemoDetailSnapshot();
   } catch (err) {
     console.error('메모 상세 조회 실패:', err);
     showToast(`메모 조회 실패: ${err.message}`);
   }
+}
+
+function getMemoDetailSnapshot() {
+  return JSON.stringify([
+    els.memoDetailTitle.value.trim(),
+    els.memoDetailType ? els.memoDetailType.value : '',
+    els.memoDetailStatus ? els.memoDetailStatus.value : '',
+    getContentsFromContainer(els.memoDetailContentsContainer),
+    getLinksFromContainer(els.memoDetailLinksContainer)
+  ]);
+}
+
+function requestCloseMemoDetail() {
+  if (memoState.detailSnapshot !== undefined && getMemoDetailSnapshot() !== memoState.detailSnapshot) {
+    if (!confirm('저장하지 않은 변경 내용이 있습니다. 닫으시겠습니까?')) return;
+  }
+  closeMemoDetailModal();
 }
 
 function closeMemoDetailModal() {
@@ -1785,11 +1807,15 @@ async function handleUpdateMemo() {
 
   try {
     els.memoDetailSaveBtn.disabled = true;
-    els.memoDetailSaveBtn.textContent = '저장 중...';
 
     await window.memoApi.updateNote(id, { title, type, status, contents, links });
     showToast('메모가 성공적으로 수정되었습니다.');
-    closeMemoDetailModal();
+    memoState.detailSnapshot = getMemoDetailSnapshot();
+    if (els.memoDetailError) els.memoDetailError.classList.add('hidden');
+    if (els.memoDetailSaveStatus) {
+      els.memoDetailSaveStatus.textContent = `✓ 저장되었습니다 (${new Date().toLocaleTimeString('ko-KR')})`;
+      els.memoDetailSaveStatus.classList.remove('hidden');
+    }
 
     if (els.memoListModal && !els.memoListModal.classList.contains('hidden')) {
       loadMemoList();
@@ -1802,12 +1828,11 @@ async function handleUpdateMemo() {
     }
   } finally {
     els.memoDetailSaveBtn.disabled = false;
-    els.memoDetailSaveBtn.textContent = '저장';
   }
 }
 
 async function handleDeleteMemo(id) {
-  if (!confirm('정말로 이 개발 메모를 삭제하시겠습니까?')) {
+  if (!confirm('정말 삭제하시겠습니까?')) {
     return;
   }
   try {
@@ -1987,8 +2012,8 @@ if (els.memoDetailDeleteBtn) {
     if (memoState.currentDetailId) handleDeleteMemo(memoState.currentDetailId);
   });
 }
-if (els.memoDetailBackBtn) els.memoDetailBackBtn.addEventListener('click', closeMemoDetailModal);
-if (els.memoDetailCloseX) els.memoDetailCloseX.addEventListener('click', closeMemoDetailModal);
+if (els.memoDetailBackBtn) els.memoDetailBackBtn.addEventListener('click', requestCloseMemoDetail);
+if (els.memoDetailCloseX) els.memoDetailCloseX.addEventListener('click', requestCloseMemoDetail);
 if (els.memoDetailFullscreenBtn) {
   els.memoDetailFullscreenBtn.addEventListener('click', () => {
     toggleModalFullscreen(els.memoDetailPanel, els.memoDetailFullscreenBtn, 'memoDetail');
@@ -2032,6 +2057,96 @@ if (window.memoApi?.onOpenList) {
   window.memoApi.onOpenList(() => openMemoListModal());
 }
 
+// 내보내기/가져오기 모달
+const transferState = { mode: '', kind: '', path: '' };
+const transferEls = {
+  modal: document.getElementById('transfer-modal'),
+  title: document.getElementById('transfer-title'),
+  password: document.getElementById('transfer-password'),
+  pathLabel: document.getElementById('transfer-path-label'),
+  path: document.getElementById('transfer-path'),
+  chooseBtn: document.getElementById('transfer-choose-btn'),
+  error: document.getElementById('transfer-error'),
+  cancelBtn: document.getElementById('transfer-cancel-btn'),
+  runBtn: document.getElementById('transfer-run-btn')
+};
+
+function openTransferModal({ mode, kind }) {
+  const kindLabel = kind === 'memo' ? '메모' : '설정';
+  const modeLabel = mode === 'export' ? '내보내기' : '가져오기';
+  Object.assign(transferState, { mode, kind, path: '' });
+  transferEls.title.textContent = `${kindLabel} ${modeLabel}`;
+  transferEls.pathLabel.textContent = mode === 'export' ? '저장 폴더' : '파일 경로';
+  transferEls.runBtn.textContent = modeLabel;
+  transferEls.password.value = '';
+  transferEls.path.value = '';
+  transferEls.error.classList.add('hidden');
+  transferEls.modal.classList.remove('hidden');
+  transferEls.password.focus();
+}
+
+function closeTransferModal() {
+  transferEls.modal.classList.add('hidden');
+  transferEls.password.value = '';
+}
+
+function showTransferError(msg) {
+  transferEls.error.textContent = msg;
+  transferEls.error.classList.remove('hidden');
+}
+
+async function runTransfer() {
+  const password = transferEls.password.value;
+  if (!password) return showTransferError('비밀번호를 입력해 주세요.');
+  if (!transferState.path) {
+    return showTransferError(transferState.mode === 'export' ? '저장 폴더를 선택해 주세요.' : '가져올 파일을 선택해 주세요.');
+  }
+  const { mode, kind } = transferState;
+  const kindLabel = kind === 'memo' ? '메모' : '설정';
+  if (mode === 'import' && !confirm(`기존 ${kindLabel} 데이터가 가져온 데이터로 덮어쓰기 됩니다. 계속하시겠습니까?`)) return;
+
+  transferEls.runBtn.disabled = true;
+  try {
+    const res = mode === 'export'
+      ? await window.transferApi.exportData({ kind, password, dir: transferState.path })
+      : await window.transferApi.importData({ kind, password, filePath: transferState.path });
+    if (!res.ok) return showTransferError(res.error || '처리에 실패했습니다.');
+    closeTransferModal();
+    if (mode === 'export') {
+      showToast(`${kindLabel} 내보내기 완료: ${res.filePath}`);
+    } else {
+      showToast(`${kindLabel} 가져오기 완료 (${res.count}건)`);
+      if (kind === 'memo' && els.memoListModal && !els.memoListModal.classList.contains('hidden')) loadMemoList();
+      if (kind === 'settings') {
+        await loadConfigFromDb();
+        await initSettingsForm();
+      }
+    }
+  } catch (err) {
+    showTransferError(err.message);
+  } finally {
+    transferEls.runBtn.disabled = false;
+  }
+}
+
+if (window.transferApi) {
+  window.transferApi.onRequest(openTransferModal);
+  transferEls.chooseBtn.addEventListener('click', async () => {
+    const p = transferState.mode === 'export'
+      ? await window.transferApi.chooseFolder()
+      : await window.transferApi.chooseFile();
+    if (p) {
+      transferState.path = p;
+      transferEls.path.value = p;
+    }
+  });
+  transferEls.cancelBtn.addEventListener('click', closeTransferModal);
+  transferEls.runBtn.addEventListener('click', runTransfer);
+  transferEls.password.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') runTransfer();
+  });
+}
+
 // 글로벌 단축키: Alt+M (추가), Alt+L (조회), Escape (닫기)
 window.addEventListener('keydown', (e) => {
   if (e.altKey && (e.key === 'm' || e.key === 'M' || e.code === 'KeyM')) {
@@ -2044,7 +2159,7 @@ window.addEventListener('keydown', (e) => {
     if (els.memoAiModal && !els.memoAiModal.classList.contains('hidden')) {
       closeMemoAiModal();
     } else if (els.memoDetailModal && !els.memoDetailModal.classList.contains('hidden')) {
-      closeMemoDetailModal();
+      requestCloseMemoDetail();
     } else if (els.memoCreateModal && !els.memoCreateModal.classList.contains('hidden')) {
       closeMemoCreateModal();
     } else if (els.memoListModal && !els.memoListModal.classList.contains('hidden')) {
@@ -2060,5 +2175,4 @@ window.addEventListener('keydown', (e) => {
   initSearchForm();
   showScreen('search');
 })();
-
 

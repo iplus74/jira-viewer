@@ -42,6 +42,18 @@ contextBridge.exposeInMainWorld('memoApi', {
   }
 });
 
+contextBridge.exposeInMainWorld('transferApi', {
+  chooseFolder: () => ipcRenderer.invoke('transfer:chooseFolder'),
+  chooseFile: () => ipcRenderer.invoke('transfer:chooseFile'),
+  exportData: (payload) => ipcRenderer.invoke('transfer:export', payload),
+  importData: (payload) => ipcRenderer.invoke('transfer:import', payload),
+  onRequest: (callback) => {
+    const handler = (_event, info) => callback(info);
+    ipcRenderer.on('menu:data-transfer', handler);
+    return () => ipcRenderer.removeListener('menu:data-transfer', handler);
+  }
+});
+
 contextBridge.exposeInMainWorld('settingsApi', {
   getAll: () => ipcRenderer.invoke('settings:getAll'),
   save: (settingsObj) => ipcRenderer.invoke('settings:save', settingsObj)

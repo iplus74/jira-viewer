@@ -188,6 +188,18 @@ function normalizeContents(contentsInput, fallbackDate = '') {
       if (Array.isArray(parsed)) {
         return normalizeContents(parsed, fallbackDate);
       }
+      const parsedText = typeof parsed === 'string'
+        ? parsed.trim()
+        : (parsed && typeof parsed === 'object'
+          ? String(parsed.text || parsed.content || '').trim()
+          : '');
+      if (parsedText) {
+        items = [{
+          id: `entry_${Date.now()}_0`,
+          writtenAt: fallbackDate || getNowFormattedString(),
+          text: parsedText
+        }];
+      }
     } catch {
       // 일반 문자열인 경우 단일 항목으로 변환
       items = [{
@@ -601,7 +613,63 @@ async function saveSettings(settingsObj) {
   }
 }
 
+/**
+ * 내보내기용 전체 메모 원본 행 조회
+ */
+async function exportAllNotesRaw() {
+  const db = await getDb();
+  const stmt = db.prepare('SELECT id, date, title, content, link, type, status, created_at, updated_at FROM dev_notes ORDER BY id ASC');
+  const rows = [];
+  while (stmt.step()) rows.push(stmt.getAsObject());
+  stmt.free();
+  return rows;
+}
+
+/**
+ * 가져오기: 전체 메모를 교체 (단일 트랜잭션, 실패 시 롤백되어 기존 데이터 유지)
+ */
+async function replaceAllNotesRaw(rows) {
+  if (!Array.isArray(rows)) throw new Error('메모 데이터 형식이 올바르지 않습니다.');
+  const now = new Date().toISOString();
+  for (const r of rows) {
+    if (!r || typeof r !== 'object' || !String(r.title || '').trim()) {
+      throw new Error('메모 데이터 형식이 올바르지 않습니다.');
+    }
+  }
+  const db = await getDb();
+  db.run('BEGIN TRANSACTION');
+  try {
+    db.run('DELETE FROM dev_notes');
+    const stmt = db.prepare(`
+      INSERT INTO dev_notes (id, date, title, content, link, type, status, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+    for (const r of rows) {
+      stmt.run([
+        Number.isInteger(r.id) ? r.id : null,
+        String(r.date || now.slice(0, 10)),
+        String(r.title),
+        r.content == null ? '' : String(r.content),
+        r.link == null ? '' : String(r.link),
+        String(r.type || ''),
+        String(r.status || ''),
+        String(r.created_at || now),
+        String(r.updated_at || now)
+      ]);
+    }
+    stmt.free();
+    db.run('COMMIT');
+  } catch (err) {
+    try { db.run('ROLLBACK'); } catch { /* ignore */ }
+    throw err;
+  }
+  persistDb();
+  return rows.length;
+}
+
 module.exports = {
+  exportAllNotesRaw,
+  replaceAllNotesRaw,
   getDbFilePath,
   getDb,
   createNote,
@@ -614,4 +682,3 @@ module.exports = {
   getSetting,
   saveSettings
 };
-

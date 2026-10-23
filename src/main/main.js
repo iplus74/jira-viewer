@@ -7,6 +7,7 @@ const { execFile } = require('child_process');
 const jiraClient = require('./jiraClient');
 const aiSummary = require('./aiSummary');
 const memoDb = require('./memoDb');
+const dataTransfer = require('./dataTransfer');
 
 let mainWindow = null;
 const appIconPath = path.join(__dirname, '..', '..', 'build', 'icon.png');
@@ -15,6 +16,12 @@ const appIconPath = path.join(__dirname, '..', '..', 'build', 'icon.png');
 process.on('unhandledRejection', (err) => {
   console.error('처리되지 않은 Promise 오류:', err);
 });
+
+function sendTransfer(mode, kind) {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send('menu:data-transfer', { mode, kind });
+  }
+}
 
 function setupApplicationMenu() {
   const isMac = process.platform === 'darwin';
@@ -54,6 +61,11 @@ function setupApplicationMenu() {
             }
           }
         },
+        { type: 'separator' },
+        { label: '메모 내보내기', click: () => sendTransfer('export', 'memo') },
+        { label: '메모 가져오기', click: () => sendTransfer('import', 'memo') },
+        { label: '설정 내보내기', click: () => sendTransfer('export', 'settings') },
+        { label: '설정 가져오기', click: () => sendTransfer('import', 'settings') },
         { type: 'separator' },
         isMac ? { role: 'close', label: '창 닫기' } : { role: 'quit', label: '종료' }
       ]
@@ -302,6 +314,36 @@ ipcMain.handle('settings:chooseDownloadFolder', async () => {
     return null;
   }
   return result.filePaths[0];
+});
+
+// 내보내기/가져오기
+ipcMain.handle('transfer:chooseFolder', async () => {
+  const result = await dialog.showOpenDialog(mainWindow, { properties: ['openDirectory', 'createDirectory'] });
+  return result.canceled || !result.filePaths.length ? null : result.filePaths[0];
+});
+
+ipcMain.handle('transfer:chooseFile', async () => {
+  const result = await dialog.showOpenDialog(mainWindow, {
+    properties: ['openFile'],
+    filters: [{ name: 'Jira Viewer 내보내기 파일', extensions: ['jvexp'] }, { name: '모든 파일', extensions: ['*'] }]
+  });
+  return result.canceled || !result.filePaths.length ? null : result.filePaths[0];
+});
+
+ipcMain.handle('transfer:export', async (_event, payload) => {
+  try {
+    return { ok: true, ...(await dataTransfer.exportData(payload || {})) };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+});
+
+ipcMain.handle('transfer:import', async (_event, payload) => {
+  try {
+    return { ok: true, ...(await dataTransfer.importData(payload || {})) };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
 });
 
 // Antigravity CLI 기본 작업 폴더 경로 반환
