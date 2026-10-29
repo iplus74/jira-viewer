@@ -500,6 +500,20 @@ async function searchUsers(query, config, issueKey) {
 }
 
 /**
+ * 제목 키워드 검색 절(summary ~ "...") 생성
+ * - 제어 문자(예: 한글 IME 입력 중 섞이는 U+0008)는 공백으로 치환
+ * - Lucene 예약 문자( ( ) [ ] { } + - & | ! ^ ~ : / \ " )는 이스케이프 (와일드카드 * ? 는 유지)
+ * - JQL 문자열 리터럴용으로 \ 와 " 를 한 번 더 이스케이프
+ */
+function buildSummaryClause(keyword) {
+  const cleaned = String(keyword || '').replace(/[\u0000-\u001F\u007F]/g, ' ').replace(/\s+/g, ' ').trim();
+  if (!cleaned) return null;
+  const luceneEscaped = cleaned.replace(/[+\-&|!(){}[\]^~:\\/"]/g, '\\$&');
+  const jqlEscaped = luceneEscaped.replace(/[\\"]/g, '\\$&');
+  return `summary ~ "${jqlEscaped}"`;
+}
+
+/**
  * '이슈' 검색: 담당자 == email 및/또는 제목 == keyword, 상태 == statusKey.
  */
 async function searchAssignedIssues(config, { email, keyword, statusKey = 'default', maxResults = 20 }) {
@@ -516,8 +530,8 @@ async function searchAssignedIssues(config, { email, keyword, statusKey = 'defau
   }
 
   if (keyword) {
-    const escapedKeyword = keyword.replace(/"/g, '\\"');
-    clauses.push(`summary ~ "${escapedKeyword}"`);
+    const summaryClause = buildSummaryClause(keyword);
+    if (summaryClause) clauses.push(summaryClause);
   }
 
   const { clause: statusClause, desc: statusDesc } = buildStatusClause(statusKey);
@@ -543,7 +557,7 @@ async function searchAssignedIssues(config, { email, keyword, statusKey = 'defau
 }
 
 /**
- * '맨션된 이슈' 검색: 담당자 != email, 백로그/진행 중/테스트 요청 상태, 댓글에서 email이 맨션되었으나
+ * '맨션된 이슈' 검색: 백로그/진행 중/테스트 요청 상태, 댓글에서 email이 맨션되었으나
  * 해당 댓글에 대댓글이 없거나 대댓글 작성자가 email이 아닌 이슈.
  */
 async function searchMentionedIssues(config, { email, keyword, statusKey = 'default', maxResults = 20 }) {
@@ -553,10 +567,10 @@ async function searchMentionedIssues(config, { email, keyword, statusKey = 'defa
     throw new Error(`이메일(${email})에 해당하는 Jira 사용자를 찾을 수 없습니다.`);
   }
 
-  const clauses = [`assignee != "${accountId}"`];
+  const clauses = [];
   if (keyword) {
-    const escapedKeyword = keyword.replace(/"/g, '\\"');
-    clauses.push(`summary ~ "${escapedKeyword}"`);
+    const summaryClause = buildSummaryClause(keyword);
+    if (summaryClause) clauses.push(summaryClause);
   }
   let statusDesc;
 
@@ -573,7 +587,8 @@ async function searchMentionedIssues(config, { email, keyword, statusKey = 'defa
     }
   }
 
-  const jql = `${clauses.join(' AND ')} ORDER BY created DESC`.trim().replace(/\s+/g, ' ');
+  const orderClause = 'ORDER BY created DESC';
+  const jql = (clauses.length > 0 ? `${clauses.join(' AND ')} ${orderClause}` : orderClause).trim().replace(/\s+/g, ' ');
 
   const searchUrl = new URL(`${config.jiraUrl}/rest/api/3/search/jql`);
   searchUrl.searchParams.append('jql', jql);
@@ -934,6 +949,47 @@ async function addComment(issueKey, commentText, parentId, config, mentions = []
   return { comment, uploadedAttachments: uploaded };
 }
 
+/**
+ * 특정 댓글에 '✅ 확인' 답글 등록 (ADF emoji 노드 사용)
+ */
+async function addConfirmComment(issueKey, parentId, config) {
+  const headers = buildAuthHeaders(config);
+  const commentUrl = `${config.jiraUrl}/rest/api/3/issue/${issueKey}/comment`;
+
+  const bodyData = {
+    body: {
+      type: 'doc',
+      version: 1,
+      content: [
+        {
+          type: 'paragraph',
+          content: [
+            { type: 'emoji', attrs: { shortName: ':white_check_mark:', id: '2705', text: '✅' } },
+            { type: 'text', text: ' 확인' }
+          ]
+        }
+      ]
+    }
+  };
+
+  if (parentId) {
+    bodyData.parentId = String(parentId);
+  }
+
+  const response = await fetch(commentUrl, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify(bodyData)
+  });
+
+  if (!response.ok) {
+    const errText = await response.text();
+    throw new Error(`Jira 확인 답글 등록 실패 (${response.status}): ${errText}`);
+  }
+
+  return await response.json();
+}
+
 module.exports = {
   buildAuthHeaders,
   adfToText,
@@ -949,5 +1005,6 @@ module.exports = {
   getAvailableTransitions,
   transitionIssueStatus,
   buildStatusClause,
-  addComment
+  addComment,
+  addConfirmComment
 };

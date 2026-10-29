@@ -837,6 +837,11 @@ document.addEventListener('click', (e) => {
   }
 });
 
+// 댓글/대댓글 하단 '✅ 확인' 버튼 (답글은 항상 최상위 댓글 스레드에 등록)
+function confirmButtonHtml(parentId) {
+  return `<div class="mt-1"><button class="btn-confirm-comment px-2 py-0.5 bg-[#ebecf0] hover:bg-[#dfe1e6] text-[#42526e] text-xs font-medium rounded cursor-pointer border-0" data-parent-id="${parentId}">✅ 확인</button></div>`;
+}
+
 function renderIssueDetail(detail) {
   const safeWebUrl = sanitizeHttpUrl(detail.webUrl);
   let commentsHtml = '';
@@ -851,6 +856,7 @@ function renderIssueDetail(detail) {
           <div class="ml-5 mt-2 mb-3 border-l-[3px] border-[#c1c7d0] pl-3">
             <div class="text-xs text-[#6b778c] mb-1">#${r.index} ${escapeHtml(r.author)} · ${new Date(r.created).toLocaleString('ko-KR')} [답글]</div>
             <div class="whitespace-pre-wrap leading-normal">${renderTextWithAttachments(r.text)}</div>
+            ${confirmButtonHtml(c.id)}
           </div>`
           )
           .join('');
@@ -861,6 +867,7 @@ function renderIssueDetail(detail) {
             <button class="btn-toggle-reply text-[#0052cc] hover:underline cursor-pointer bg-transparent border-0 text-xs p-0 font-medium" data-comment-id="${c.id}">답글 달기</button>
           </div>
           <div class="whitespace-pre-wrap leading-normal">${renderTextWithAttachments(c.text)}</div>
+          ${confirmButtonHtml(c.id)}
           
           <div id="reply-form-${c.id}" class="hidden mt-2 mb-3 p-2.5 bg-[#fafbfc] border border-[#dfe1e6] rounded">
             <textarea id="reply-input-${c.id}" rows="2" class="reply-textarea w-full p-2 border border-[#dfe1e6] rounded text-xs focus:outline-none focus:border-[#0052cc] resize-y" placeholder="답글을 입력하세요... (@로 사용자 검색)"></textarea>
@@ -997,6 +1004,28 @@ els.issueDetail.addEventListener('click', async (e) => {
       showToast(`댓글 등록 실패: ${err.message}`);
       submitCommentBtn.disabled = false;
       submitCommentBtn.textContent = '댓글 작성';
+    }
+    return;
+  }
+
+  // '✅ 확인' 버튼 클릭 → 확인 답글 자동 등록
+  const confirmBtn = e.target.closest('.btn-confirm-comment');
+  if (confirmBtn) {
+    if (confirmBtn.disabled) return;
+    confirmBtn.disabled = true;
+    confirmBtn.textContent = '등록 중...';
+    try {
+      const detail = await window.jiraApi.addConfirmComment({
+        ...getJiraConfigPayload(),
+        issueKey: state.currentIssueKey,
+        parentId: confirmBtn.dataset.parentId
+      });
+      renderIssueDetail(detail);
+      showToast('확인 답글이 등록되었습니다.');
+    } catch (err) {
+      showToast(`확인 답글 등록 실패: ${err.message}`);
+      confirmBtn.disabled = false;
+      confirmBtn.textContent = '✅ 확인';
     }
     return;
   }

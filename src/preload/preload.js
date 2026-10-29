@@ -9,6 +9,7 @@ contextBridge.exposeInMainWorld('jiraApi', {
   getTransitions: (payload) => ipcRenderer.invoke('jira:getTransitions', payload),
   transitionIssue: (payload) => ipcRenderer.invoke('jira:transitionIssue', payload),
   addComment: (payload) => ipcRenderer.invoke('jira:addComment', payload),
+  addConfirmComment: (payload) => ipcRenderer.invoke('jira:addConfirmComment', payload),
   searchUsers: (payload) => ipcRenderer.invoke('jira:searchUsers', payload),
   openInBrowser: (webUrl) => ipcRenderer.invoke('jira:openInBrowser', webUrl),
   getSummary: (payload) => ipcRenderer.invoke('ai:getSummary', payload),

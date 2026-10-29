@@ -282,6 +282,13 @@ ipcMain.handle('jira:addComment', async (_event, payload) => {
   return jiraClient.getIssueDetail(payload.issueKey, config, resolveDownloadDir(payload.downloadDir), uploadedAttachments);
 });
 
+// 댓글/대댓글에 '✅ 확인' 답글 등록
+ipcMain.handle('jira:addConfirmComment', async (_event, payload) => {
+  const config = buildJiraConfig(payload);
+  await jiraClient.addConfirmComment(payload.issueKey, payload.parentId, config);
+  return jiraClient.getIssueDetail(payload.issueKey, config, resolveDownloadDir(payload.downloadDir));
+});
+
 // 댓글에 첨부할 이미지/파일 선택 다이얼로그
 ipcMain.handle('dialog:chooseCommentAttachments', async () => {
   const result = await dialog.showOpenDialog(mainWindow, {
